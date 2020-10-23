@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
 import logging
-import os
 import sys
 
 from wbia_lca import baseline
@@ -223,6 +222,8 @@ def vary_ranker():
 
 
 def one_simulation(out_path, file_prefix, sim_params, ga_params):
+    import os
+
     print('==============================')
     print('Simulation name', file_prefix)
     path = os.path.join(out_path, file_prefix)
@@ -236,6 +237,18 @@ def one_simulation(out_path, file_prefix, sim_params, ga_params):
         os.remove(log_file)
     except Exception:
         pass
+
+    """Configure the log file. This is repeated in the __init__ function
+    for the graph_algorithm class, something that is only done here
+    simulation information into the log file. It should not be done
+    when running with "live" data.
+    """
+    from wbia_lca import formatter
+
+    handler = logging.FileHandler(log_file, mode='w')
+    handler.setLevel(ga_params['log_level'])
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
     log_format = '%(levelname)-6s [%(filename)18s:%(lineno)3d] %(message)s'
     logging.basicConfig(
