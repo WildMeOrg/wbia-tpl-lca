@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from wbia.control import controller_inject
 from wbia.constants import CONTAINERIZED, PRODUCTION  # NOQA
+from wbia import constants as const
 from wbia.web.graph_server import GraphActor
 import logging
 import utool as ut
@@ -32,7 +33,7 @@ register_preproc_annot = controller_inject.register_preprocs['annot']
 @register_api('/api/plugin/lca/sim/', methods=['GET'])
 def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
     r"""
-    Create an LCA graph algorithm object
+    Create an LCA graph algorithm object and run a simulator
 
     Args:
         ibs (IBEISController): wbia controller object
@@ -52,7 +53,7 @@ def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
 
     RESTful:
         Method: GET
-        URL:    /api/plugin/lca/overall/driver/
+        URL:    /api/plugin/lca/sim/
 
     Doctest:
         >>> # ENABLE_DOCTEST
@@ -246,25 +247,117 @@ def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
     return changes_to_review
 
 
-def form_database(request):
+@register_ibs_method
+@register_api('/api/plugin/lca/wbia/', methods=['GET'])
+def wbia_plugin_lca_wbia(ibs, ga_config, verifier_gt, request, db_result=None):
+    r"""
+    Create an LCA graph algorithm object and run via WBIA
+
+    Args:
+        ibs (IBEISController): wbia controller object
+        ga_config (str): graph algorithm config INI file
+        verifier_gt (str): json file containing verification algorithm ground truth
+        request (str): json file continain graph algorithm request info
+        db_result (str, optional): file to write resulting json database
+
+    Returns:
+        object: changes_to_review
+
+    CommandLine:
+        python -m wbia_lca._plugin wbia_plugin_lca_wbia
+        python -m wbia_lca._plugin wbia_plugin_lca_wbia:0
+
+    RESTful:
+        Method: GET
+        URL:    /api/plugin/lca/wbia/
+
+    Doctest:
+        >>> # ENABLE_DOCTEST
+        >>> import wbia
+        >>> import utool as ut
+        >>> import random
+        >>> random.seed(1)
+        >>> from wbia.init import sysres
+        >>> dbdir = sysres.ensure_testdb_identification_example()
+        >>> ibs = wbia.opendb(dbdir=dbdir)
+        >>> ga_config = 'examples/default/config.ini'
+        >>> verifier_gt = 'examples/default/verifier_probs.json'
+        >>> request = 'examples/default/request_example.json'
+        >>> db_result = 'examples/default/result.json'
+        >>> changes_to_review = ibs.wbia_plugin_lca_wbia(ga_config, verifier_gt, request, db_result)
+        >>> results = []
+        >>> for cluster in changes_to_review:
+        >>>     lines = []
+        >>>     for change in cluster:
+        >>>         line = []
+        >>>         line.append('query nodes %s' % (sorted(change.query_nodes),))
+        >>>         line.append('change_type %s' % (change.change_type,))
+        >>>         line.append('old_clustering %s' % (sorted(change.old_clustering), ))
+        >>>         line.append('len(new_clustering) %s' % (len(sorted(change.new_clustering)), ))
+        >>>         line.append('removed_nodes %s' % (sorted(change.removed_nodes),))
+        >>>         lines.append('\n'.join(line))
+        >>>     results.append('\n-\n'.join(sorted(lines)))
+        >>> result = '\n----\n'.join(sorted(results))
+        >>> print('----\n%s\n----' % (result, ))
+    """
+    # 1. Configuration
+    config_ini = configparser.ConfigParser()
+    config_ini.read(ga_config)
+
+    # 2. Recent results from verification ground truth tests. Used to
+    # establish the weighter.
+    with open(verifier_gt, 'r') as fn:
+        verifier_gt = json.loads(fn.read())
+
+    # 3. Form the parameters dictionary and weight objects (one per
+    # verification algorithm).
+    ga_params, wgtrs = ga_driver.params_and_weighters(config_ini, verifier_gt)
+    if len(wgtrs) > 1:
+        logger.info('Not currently handling more than one weighter!!')
+        sys.exit(1)
+    wgtr = wgtrs[0]
+
+    # 4. Get the request dictionary, which includes the database, the
+    # actual request edges and clusters, and the edge generator edges
+    # and ground truth (for simulation).
+    with open(request, 'r') as fn:
+        request = json.loads(fn.read())
+
+    db = form_database(request)
+    edge_gen = form_edge_generator(request, db, wgtr)
+    verifier_req, human_req, cluster_req = extract_requests(request, db)
+
+    # 5. Form the graph algorithm driver
+    driver = ga_driver.ga_driver(
+        verifier_req, human_req, cluster_req, db, edge_gen, ga_params
+    )
+
+    # 6. Run it. Changes are logged.
+    changes_to_review = driver.run_all_ccPICs()
+
+    # 7. Commit changes. Record them in the database and the log
+    # file.
+    # TBD
+
+    return changes_to_review
+
+
+def form_database(request, ibs=None):
     """
     From the request json object extract the database if it is there.
     If not, return an empty database. The json includes edge quads
     (n0, n1, w, aug_name) and a clustering dictionary.
     """
-    edge_quads = []
-    clustering_dict = dict()
+    from wbia_lca import db_interface_sim
 
-    if 'database' not in request:
-        return edge_quads, clustering_dict
+    req_db = request.get('database', {})
 
-    req_db = request['database']
-    if 'quads' in req_db:
-        edge_quads = req_db['quads']
-    if 'clustering' in req_db:
-        clustering_dict = {str(cid): c for cid, c in req_db['clustering'].items()}
+    edge_quads = req_db.get('quads', [])
 
-    db = _plugin_db_interface.db_interface(edge_quads, clustering_dict)
+    clustering_dict = req_db.get('clustering', {})
+    clustering_dict = {str(cid): c for cid, c in clustering_dict.items()}
+
+    db = db_interface_sim.db_interface_sim(edge_quads, clustering_dict, ibs=ibs)
     return db
 
 
@@ -273,9 +366,13 @@ def form_edge_generator(request, db, wgtr):
     Form the edge generator object. Unlike the database, the generator
     must be there for the small example / simulator to run.
     """
+    from wbia_lca import edge_generator_sim
+
+    gen_dict = request.get('generator', None)
+
     try:
-        gen_dict = request['generator']
-    except KeyError:
+        assert gen_dict is not None
+    except AssertionError:
         logger.info('Information about the edge generator must be in the request.')
         sys.exit(1)
 
@@ -283,62 +380,48 @@ def form_edge_generator(request, db, wgtr):
     # database yet. These are prob_quads of the form (n0, n1, prob,
     # aug_name).  The weighter will be used to turn the prob into a
     # weight.
-    prob_quads = []
-    if 'verifier' in gen_dict:
-        prob_quads = gen_dict['verifier']
+    prob_quads = gen_dict.get('verifier', [])
 
     # Get human decisions of the form (n0, n1, bool). These will be
     # returned as new edges when first requested
-    human_triples = []
-    if 'human' in gen_dict:
-        human_triples = gen_dict['human']
+    human_triples = gen_dict.get('human', [])
 
     # Get the ground truth clusters - used to generate edges that
     # aren't listed explicitly
-    gt_clusters = []
-    if 'gt_clusters' in gen_dict:
-        gt_clusters = gen_dict['gt_clusters']
+    gt_clusters = gen_dict.get('gt_clusters', [])
 
     # Get the nodes to be removed early in the computation.
-    nodes_to_remove = []
-    if 'nodes_to_remove' in gen_dict:
-        nodes_to_remove = gen_dict['nodes_to_remove']
+    nodes_to_remove = gen_dict.get('nodes_to_remove', [])
 
     # Get the number of steps between returning edge generation
     # results. If this value is 0 then they are returned immediately
     # upon request.
-    delay_steps = 0
-    if 'delay_steps' in gen_dict:
-        delay_steps = gen_dict['delay_steps']
+    delay_steps = gen_dict.get('delay_steps', 0)
 
-    edge_gen = _plugin_edge_generator.edge_generator(
+    edge_gen = edge_generator_sim.edge_generator_sim(
         db, wgtr, prob_quads, human_triples, gt_clusters, nodes_to_remove, delay_steps
     )
     return edge_gen
 
 
 def extract_requests(request, db):
+    req_dict = request.get('query', None)
+
     try:
-        req_dict = request['query']
-    except KeyError:
+        assert req_dict is not None
+    except AssertionError:
         logger.info('Information about the GA query itself must be in the request JSON.')
         sys.exit(1)
 
     # 1. Get the verifier result quads (n0, n1, prob, aug_name).
-    verifier_results = []
-    if 'verifier' in req_dict:
-        verifier_results = req_dict['verifier']
+    verifier_results = req_dict.get('verifier', [])
 
     # 2. Get the human decision result triples (n0, n1, bool)
     # No error checking is used
-    human_decisions = []
-    if 'human' in req_dict:
-        human_decisions = req_dict['human']
+    human_decisions = req_dict.get('human', [])
 
     # 3. Get the list of existing cluster ids to check
-    cluster_ids_to_check = []
-    if 'cluster_ids' in req_dict:
-        cluster_ids_to_check = req_dict['cluster_ids']
+    cluster_ids_to_check = req_dict.get('cluster_ids', [])
 
     for cid in cluster_ids_to_check:
         logger.info(cid)
@@ -407,15 +490,86 @@ class LCAActor(GraphActor):
     """
 
     def __init__(actor, *args, **kwargs):
-        super(LCAActor, actor).__init__(*args, **kwargs)
         actor.db = None
+        actor.infr = None
+        actor.edge_gen = None
+
+        actor.request_queue = None
+        actor.result_queue = None
+
+        super(LCAActor, actor).__init__(*args, **kwargs)
 
     def start(actor, dbdir, aids='all', config={}, **kwargs):
         import wbia
 
+        ut.embed()
+
         assert dbdir is not None, 'must specify dbdir'
         assert actor.db is None, 'LCA database already running'
         ibs = wbia.opendb(dbdir=dbdir, use_cache=False, web=False, force_serial=True)
+
+        if aids == 'all':
+            aids = ibs.get_valid_aids()
+
+        # Create the AnnotInference
+        logger.info('starting via actor with ibs = %r' % (ibs,))
+        actor.infr = wbia.AnnotInference(ibs=ibs, aids=aids, autoinit=True)
+        actor.infr.print('started via actor')
+        actor.infr.print('config = {}'.format(ut.repr3(config)))
+        # Configure query_annot_infr
+        for key in config:
+            actor.infr.params[key] = config[key]
+
+        # Initialize
+        # TODO: Initialize state from staging reviews after annotmatch
+        # timestamps (in case of crash)
+
+        # Load random forests (TODO: should this be config specifiable?)
+        actor.infr.print('loading published models')
+        try:
+            actor.infr.load_published()
+        except Exception:
+            pass
+
+        if False:
+            actor.infr.exec_matching(
+                name_method='edge',
+                cfgdict={
+                    'resize_dim': 'width',
+                    'dim_size': 700,
+                    'requery': True,
+                    'can_match_samename': False,
+                    'can_match_sameimg': False,
+                    # 'sv_on': False,
+                },
+            )
+
+            review_cfg = {}
+
+            ranks_top = review_cfg.get('ranks_top', 5)
+            ranks_bot = review_cfg.get('ranks_bot', 0)
+
+            edges = []
+
+            for count, cm in enumerate(actor.infr.cm_list):
+                score_list = cm.annot_score_list
+                rank_list = ut.argsort(score_list)[::-1]
+                sortx = ut.argsort(rank_list)
+
+                top_sortx = sortx[:ranks_top]
+                bot_sortx = sortx[len(sortx) - ranks_bot :]
+                short_sortx = ut.unique(top_sortx + bot_sortx)
+
+                daid_list = ut.take(cm.daid_list, short_sortx)
+                for daid in daid_list:
+                    u, v = (cm.qaid, daid)
+                    if v < u:
+                        u, v = v, u
+                    edges.append((u, v))
+
+            probs = actor.infr._make_task_probs(edges)
+
+        aids_set = set(aids)
 
         # 1. Configuration
         # fmt: off
@@ -478,13 +632,13 @@ class LCAActor(GraphActor):
         # 3. Form the parameters dictionary and weight objects (one per
         # verification algorithm).
         wgtrs = ga_driver.generate_weighters(ga_params, verifier_gt)
+        actor.wgtr = wgtrs[0]
 
-        wgtr = wgtrs[0]
         ga_params['min_delta_score_converge'] = -ga_params[
             'min_delta_converge_multiplier'
         ] * (
-            wgtr.human_wgt(is_marked_correct=True)
-            - wgtr.human_wgt(is_marked_correct=False)
+            actor.wgtr.human_wgt(is_marked_correct=True)
+            - actor.wgtr.human_wgt(is_marked_correct=False)
         )
 
         ga_params['min_delta_score_stability'] = (
@@ -494,80 +648,57 @@ class LCAActor(GraphActor):
         # 4. Get the request dictionary, which includes the database, the
         # actual request edges and clusters, and the edge generator edges
         # and ground truth (for simulation).
+        actor.db = _plugin_db_interface.db_interface_wbia(ibs, aids)
+        actor.edge_gen = _plugin_edge_generator.edge_generator_wbia(actor.db, actor.wgtr)
+
+        verifier = []
+        human = []
+
+        rids = ibs._get_all_review_rowids()
+        for rid in rids:
+            aid1, aid2 = ibs.get_review_aid_tuple(rid)
+            aid1_, aid2_ = str(aid1), str(aid2)
+            if aid1 not in aids_set:
+                continue
+            if aid2 not in aids_set:
+                continue
+            decision = ibs.get_review_decision_str(rid)
+            assert decision in const.EVIDENCE_DECISION.NICE_TO_CODE
+            if decision in ['Unreviewed']:
+                continue
+            if decision in ['Positive']:
+                value = True
+            elif decision in ['Negative']:
+                value = False
+            elif decision in ['Incomparable']:
+                value = None
+            else:
+                raise ValueError()
+            identity = ibs.get_review_identity(rid)
+            if identity.startswith('algo:'):
+                verifier.append([aid1_, aid2_, 0.0 if value else 1.0, 'vamp'])
+            elif identity.startswith('user:'):
+                human.append([aid1_, aid2_, value])
+            else:
+                raise ValueError()
+
+        cluster_ids = [str(nids[0])]
+
         # fmt: off
         request = {
-            'database': {
-                'quads': [
-                    ['a', 'b', 45, 'vamp'],
-                    ['a', 'd', 50, 'vamp'],
-                    ['a', 'd', -100, 'human'],
-                    ['b', 'd', -85, 'vamp'],
-                    ['b', 'd', 100, 'human'],
-                    ['d', 'f', 45, 'vamp'],
-                    ['d', 'f', -100, 'human'],
-                    ['f', 'h', 34, 'vamp'],
-                    ['f', 'i', 16, 'vamp'],
-                    ['f', 'i', -100, 'human'],
-                    ['h', 'i', 85, 'vamp'],
-                    ['h', 'j', 80, 'vamp'],
-                    ['i', 'j', 75, 'vamp'],
-                    ['j', 'k', -100, 'human'],
-                    ['k', 'l', 80, 'vamp'],
-                    ['l', 'm', -50, 'vamp'],
-                    ['k', 'm', 100, 'human'],
-                ],
-                'clustering': {
-                    '100': ['a', 'b'],
-                    '101': ['d'],
-                    '102': ['h', 'i', 'j'],
-                    '103': ['k', 'l'],
-                },
-            },
-            'generator': {
-                'verifier': [
-                    ['a', 'e', 0.88, 'vamp'],
-                    ['c', 'e', 0.83, 'vamp'],
-                    ['k', 'm', 0.9, 'vamp'],
-                    ['c', 'd', 0.75, 'vamp'],
-                ],
-                'human': [
-                    ['f', 'h', True],
-                    ['f', 'i', True],
-                    ['l', 'm', True],
-                ],
-                'gt_clusters': [
-                    ['a', 'b', 'c', 'd', 'e'],
-                    ['f', 'h', 'i', 'j'],
-                    ['g'],
-                    ['k', 'l', 'm'],
-                ],
-                'delay_steps': 5,
-                'nodes_to_remove': [],
-            },
             'query': {
-                'verifier': [
-                    ['b', 'e', 0.9, 'vamp'],
-                    ['f', 'g', 0.15, 'vamp'],
-                ],
-                'human': [
-                    ['a', 'c', True],
-                ],
-                'cluster_ids': [
-                    '103',
-                ],
+                'verifier': verifier,
+                'human': human,
+                'cluster_ids': cluster_ids,
             }
         }
         # fmt: on
 
-        ut.embed()
-
-        actor.db = form_database(request)
-        edge_gen = form_edge_generator(request, actor.db, wgtr)
         verifier_req, human_req, cluster_req = extract_requests(request, actor.db)
 
         # 5. Form the graph algorithm driver
         driver = ga_driver.ga_driver(
-            verifier_req, human_req, cluster_req, actor.db, edge_gen, ga_params
+            verifier_req, human_req, cluster_req, actor.db, actor.edge_gen, ga_params
         )
 
         # 6. Run it. Changes are logged.
@@ -577,18 +708,6 @@ class LCAActor(GraphActor):
         # 7. Commit changes. Record them in the database and the log
         # file.
         # TBD
-
-        # # Create the AnnotInference
-        # logger.info('starting via actor with ibs = %r' % (ibs,))
-        # actor.infr = wbia.AnnotInference(ibs=ibs, aids=aids, autoinit=True)
-        # actor.infr.print('started via actor')
-        # actor.infr.print('config = {}'.format(ut.repr3(config)))
-        # # Configure query_annot_infr
-        # for key in config:
-        #     actor.infr.params[key] = config[key]
-        # # Initialize
-        # # TODO: Initialize state from staging reviews after annotmatch
-        # # timestamps (in case of crash)
 
         # actor.infr.print('Initializing infr tables')
         # table = kwargs.get('init', 'staging')

@@ -32,9 +32,6 @@ class edge_generator_sim(edge_generator.edge_generator):  # NOQA
         self.delay_steps = delay_steps
         self.steps_remain = delay_steps
 
-    def edge_request_cb(self, req_list):
-        self.edge_requests += req_list
-
     def edge_result_cb(self, node_set=None):
         """
         Extract the edges (quads) from the results that are part of the weight list.

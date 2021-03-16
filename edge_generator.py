@@ -64,4 +64,8 @@ class edge_generator(object):  # NOQA
         For each node to be removed from the node_set, add it to list of nodes to be
         removed. Return this list.
         """
-        pass
+        to_remove = []
+        for n in node_set:
+            to_remove.append(n)
+            self.db.remove_node(n)
+        return to_remove
