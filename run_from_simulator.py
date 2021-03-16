@@ -278,6 +278,13 @@ def one_simulation(out_path, file_prefix, sim_params, ga_params):
         print('Starting simulation', i)
         t0 = datetime.now()
 
+    for i in range(sim_params['num_simulations']):
+        """ Get the graph algorithm parameters """
+        logger.info('===================================')
+        logger.info('Starting simulation %d' % i)
+        print('Starting simulation', i)
+        t0 = datetime.now()
+
         """
         Build the simulator
         """

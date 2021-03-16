@@ -133,7 +133,7 @@ class simulator(object):  # NOQA
             cluster = set(self.gt_clustering[cid])
 
             """
-            Generate (incorrec)t edges between clusters
+            Generate (incorrect) edges between clusters
             """
             is_match_correct = False
             while len(matches) < num_from_ranker:
