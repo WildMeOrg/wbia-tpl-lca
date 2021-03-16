@@ -56,7 +56,9 @@ class edge_generator(object):  # NOQA
 
     def edge_result_cb(self, node_set=None):
         """
-        Extract the edges (quads) from the results that are part of the weight list.
+        Extract the edges (quads) from the results whose nodes are
+        both in the node set.  If no node set is provided return all
+        edge quads.
         """
         quads_remaining = []
         quads_to_return = []
