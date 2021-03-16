@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from datetime import datetime
 import logging
 import os
 import sys
@@ -15,41 +16,238 @@ from wbia_lca import weighter as wgtr
 logger = logging.getLogger('wbia_lca')
 
 
-if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        logger.info('Usage: %s output_prefix')
-        sys.exit()
-    gen_prefix = sys.argv[1]
-
+def get_base_params():
     """
     Specify the parameters for the simulator
     """
-    sim_params = dict()
-    sim_params['pos_error_frac'] = 0.15
-    sim_params['num_clusters'] = 128  # 256
-    sim_params['num_from_ranker'] = 4  # 10
-    sim_params['p_ranker_correct'] = 0.85
-    sim_params['p_human_correct'] = 0.97
-
-    # The following are parameters of the gamma distribution.
-    # Recall the following properties:
-    #      mean is shape*scale,
-    #      mode is (shape-1)*scale
-    #      variance is shape*scale**2 = mean*scale
-    # So when these are both 2 the mean is 4, the mode is 2
-    # and the variance is 4 (st dev 2).  And, when shape = 1,
-    # the mode is at 0 and we have an exponential distribution
-    # with the beta parameter of that distribution = scale.
-    #
-    # The mean and the mode must be offset by 1 because every cluster
-    # has at least one node.
-    #
-    sim_params['gamma_shape'] = 1  # 2   # 1
-    sim_params['gamma_scale'] = 2  # 1.5 # 2
-    # num_per_cluster = sim_params['gamma_scale'] * sim_params['gamma_shape'] + 1
+    base_sim_params = dict()
 
     """
-    Build the exponential weight generator
+    The first set of parameters controls the formation of the nodes.
+    The number of nodes in each cluster is generated from a gamma
+    distribution. Since we require at least one node per cluster, the
+    mean number of nodes in the clusters is 1 plus the mean of the
+    distribution, and the mode number of nodes in the cluster is 1
+    plust the mode of the distribution. The gamma distribution is
+    controlled by the shape and the scale values:
+          mean is shape*scale,
+          mode is (shape-1)*scale
+          variance is shape*scale**2 = mean*scale
+          std dev = shape**0.5 * scale
+    So when these are both 2 the mean is 4, the mode is 2
+    and the variance is 4 (st dev 2).  And, when shape = 1,
+    the mode is at 0 and we have an exponential distribution
+    with the beta parameter of that distribution = scale.
+    """
+    base_sim_params['gamma_shape'] = 1
+    base_sim_params['gamma_scale'] = 2
+    base_sim_params['num_clusters'] = 512
+
+    """
+    The next set of parameters controls the formation of edges.  The
+    first two specify the probability that the simulation of the
+    ranker will produce an edge between any two nodes in a cluster,
+    and the second controls how many edges are returned by the
+    ranker. The third, pos_error_frac, is the expected fraction of
+    edges within a cluster that will have randomly-generated weights
+    that are negative; the expected fractions of edges between
+    clusters that will have positive weights will be approximately the
+    same. Finally, we have the fraction of decisions made by humans
+    that are expected to be correct.
+    """
+    base_sim_params['p_ranker_correct'] = 0.85
+    base_sim_params['num_from_ranker'] = 8
+    base_sim_params['pos_error_frac'] = 0.15
+    base_sim_params['p_human_correct'] = 0.95
+
+    """
+    The final parameters control the duration of each simulation and
+    the number of times each simulation runs.
+    """
+    base_sim_params['max_human_mult'] = 3
+    base_sim_params['num_simulations'] = 10
+
+    """
+    The algorithm parameters seem to be a bit less important here...
+    """
+    base_ga_params = {}
+    base_ga_params['prob_human_correct'] = base_sim_params['p_human_correct']
+    base_ga_params['min_delta_converge_multiplier'] = 2.0
+    base_ga_params['max_human_decisions'] = base_sim_params['max_human_mult'] * \
+        base_sim_params['num_clusters']
+    base_ga_params['min_delta_stability_ratio'] = 8
+    base_ga_params['augmentation_names'] = ['vamp', 'human']
+    base_ga_params['num_per_augmentation'] = 2
+    base_ga_params['tries_before_edge_done'] = 4
+    base_ga_params['ga_iterations_before_return'] = 100000  # convergence
+    base_ga_params['ga_max_num_waiting'] = 50
+    base_ga_params['log_level'] = logging.INFO
+    base_ga_params['draw_iterations'] = False
+    base_ga_params['drawing_prefix'] = 'drawing_lca'
+
+    return base_sim_params, base_ga_params
+
+
+def vary_gamma():
+    base_sim, base_ga = get_base_params()
+    sim_triples = []
+
+    # Mean = 2, mode = 1, std_dev = 1
+    sim_params = base_sim.copy()
+    sim_params['gamma_shape'] = 1
+    sim_params['gamma_scale'] = 1
+    fname = 'mode_1_mean_2'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    # Mean = 3, mode = 1, std dev = 2
+    sim_params['gamma_shape'] = 1
+    sim_params['gamma_scale'] = 2
+    fname = 'mode_1_mean_3'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    # Mean = 4, mode = 1, std dev = 3
+    sim_params['gamma_shape'] = 1
+    sim_params['gamma_scale'] = 3
+    fname = 'mode_1_mean_4'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    # Mean = 3, mode = 2,
+    sim_params['gamma_shape'] = 2
+    sim_params['gamma_scale'] = 1
+    fname = 'mode_2_mean_3'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    # Mean = 4, mode = 2
+    sim_params['gamma_shape'] = 1.5
+    sim_params['gamma_scale'] = 2
+    fname = 'mode_2_mean_4'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    return sim_triples
+
+
+def vary_human():
+    base_sim, base_ga = get_base_params()
+    sim_triples = []
+
+    sim_params = base_sim.copy()
+    sim_params['prob_human_correct'] = 0.90
+    fname = 'human_p90'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['prob_human_correct'] = 0.92
+    fname = 'human_p92'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['prob_human_correct'] = 0.94
+    fname = 'human_p94'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['prob_human_correct'] = 0.96
+    fname = 'human_p96'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['prob_human_correct'] = 0.98
+    fname = 'human_p98'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    return sim_triples
+
+
+def vary_verifier():
+    base_sim, base_ga = get_base_params()
+    sim_triples = []
+
+    sim_params = base_sim.copy()
+    sim_params['pos_error_frac'] = 0.05
+    fname = 'verify_p05'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['pos_error_frac'] = 0.10
+    fname = 'verify_p10'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['pos_error_frac'] = 0.15
+    fname = 'verify_p15'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['pos_error_frac'] = 0.20
+    fname = 'verify_p20'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['pos_error_frac'] = 0.25
+    fname = 'verify_p25'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    return sim_triples
+
+
+def vary_ranker():
+    base_sim, base_ga = get_base_params()
+    sim_triples = []
+
+    sim_params = base_sim.copy()
+    sim_params['p_ranker_corr'] = 0.70
+    fname = 'ranker_p70'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['p_ranker_corr'] = 0.75
+    fname = 'ranker_p75'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['p_ranker_corr'] = 0.80
+    fname = 'ranker_p80'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['p_ranker_corr'] = 0.85
+    fname = 'ranker_p85'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    sim_params = base_sim.copy()
+    sim_params['p_ranker_corr'] = 0.90
+    fname = 'ranker_p90'
+    sim_triples.append([sim_params.copy(), base_ga.copy(), fname])
+
+    return sim_triples
+
+
+def one_simulation(out_path, file_prefix, sim_params, ga_params):
+    print('==============================')
+    print('Simulation name', file_prefix)
+    path = os.path.join(out_path, file_prefix)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    path_and_file = os.path.join(path, file_prefix)
+
+    log_file = path_and_file + '.log'
+    # Delete log file if it exists
+    try:
+        os.remove(log_file)
+    except Exception:
+        pass
+
+    log_format = '%(levelname)-6s [%(filename)18s:%(lineno)3d] %(message)s'
+    logging.basicConfig(
+        filename=log_file, level=ga_params['log_level'], format=log_format
+    )
+
+    logging.info('Simulation parameters')
+    for k, v in sim_params.items():
+        logging.info('    %a: %a' % (k, v))
+
+    """
+    Build the exponential weight generator. This
     """
     np_ratio = sim.find_np_ratio(
         sim_params['gamma_shape'],
@@ -58,51 +256,27 @@ if __name__ == '__main__':
         sim_params['p_ranker_correct'],
     )
 
-    ga_params = {}
-    ga_params['prob_human_correct'] = sim_params['p_human_correct']
-    ga_params['min_delta_converge_multiplier'] = 0.9
-    ga_params['min_delta_stability_ratio'] = 8
-    ga_params['augmentation_names'] = ['vamp', 'human']
-    ga_params['num_per_augmentation'] = 2
-    ga_params['tries_before_edge_done'] = 4
-    ga_params['ga_iterations_before_return'] = 100000  # convergence
-    ga_params['ga_max_num_waiting'] = 50
-    ga_params['log_level'] = logging.INFO
-    ga_params['draw_iterations'] = False
-    ga_params['drawing_prefix'] = 'drawing_lca'
+    logging.info('Negative / positive prob ratio %1.3f' % np_ratio)
 
-    num_sim = 1  # 10
-    for i in range(num_sim):
+    scorer = es.exp_scores.create_from_error_frac(
+        sim_params['pos_error_frac'], np_ratio
+    )
+    wgtr_i = wgtr.weighter(scorer, human_prob=sim_params['p_human_correct'])
+
+    """  Set convergence parameters """
+    min_converge = -ga_params['min_delta_converge_multiplier'] * \
+        (wgtr_i.human_wgt(True) - wgtr_i.human_wgt(False))
+    ga_params['min_delta_score_converge'] = min_converge
+    ga_params['min_delta_score_stability'] = (
+        min_converge / ga_params['min_delta_stability_ratio']
+    )
+
+    for i in range(sim_params['num_simulations']):
         """ Get the graph algorithm parameters """
         logger.info('===================================')
-        logger.info('Starting simulation %s' % (i,))
-        file_prefix = gen_prefix + ('_%02d' % i)
-        log_file = file_prefix + '.log'
-
-        # Delete log file if it exists
-        try:
-            os.remove(log_file)
-        except Exception:
-            pass
-
-        """Configure the log file. This is repeated in the __init__ function
-        for the graph_algorithm class, something that is only done here
-        simulation information into the log file. It should not be done
-        when running with "live" data.
-        """
-        log_format = '%(levelname)-6s [%(filename)18s:%(lineno)3d] %(message)s'
-        logging.basicConfig(
-            filename=log_file, level=ga_params['log_level'], format=log_format
-        )
-
-        # To do: output information to log file about simulation.
-        logging.info('Negative / positive prob ratio %1.3f' % np_ratio)
-        logging.info('Simulation parameters %a', sim_params)
-
-        scorer = es.exp_scores.create_from_error_frac(
-            sim_params['pos_error_frac'], np_ratio
-        )
-        wgtr_i = wgtr.weighter(scorer, human_prob=sim_params['p_human_correct'])
+        logger.info('Starting simulation %d' % i)
+        print('Starting simulation', i)
+        t0 = datetime.now()
 
         """
         Build the simulator
@@ -111,17 +285,6 @@ if __name__ == '__main__':
         sim_i = sim.simulator(sim_params, wgtr_i)  # , seed=seed)
         init_edges, aug_names = sim_i.generate()
         init_clusters = []
-
-        """
-        Specify parameters for the graph algorithm
-        """
-        min_converge = -ga_params['min_delta_converge_multiplier'] * (
-            wgtr_i.human_wgt(True) - wgtr_i.human_wgt(False)
-        )
-        ga_params['min_delta_score_converge'] = min_converge
-        ga_params['min_delta_score_stability'] = (
-            min_converge / ga_params['min_delta_stability_ratio']
-        )
 
         gai = ga.graph_algorithm(
             init_edges,
@@ -160,6 +323,7 @@ if __name__ == '__main__':
         )
         logger.info('Pct equal %.3f, Precision %.3f, Recall %.3f' % (pct, pr, rec))
 
+        file_prefix = path_and_file + ('_%02d' % i)
         sim_i.csv_output(file_prefix + '_gt.csv', sim_i.gt_results)
         sim_i.csv_output(file_prefix + '_r.csv', sim_i.r_results)
         sim_i.generate_plots(file_prefix)
@@ -169,3 +333,31 @@ if __name__ == '__main__':
 
         b.all_iterations(0, max_human_baseline, 5)
         b.generate_plots(file_prefix + '_base')
+
+        t1 = datetime.now()
+        print('Simulation %d took %s' % (i, str(t1 - t0)))
+        logging.info('Simulation %d took %s' % (i, str(t1 - t0)))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) < 3:
+        print('Usage: %s out_path [name1 .. namek]\n'
+              'Where namei indicates the simulation experiment to run')
+        sys.exit()
+    out_path = sys.argv[1]
+
+    sim_triples = []
+    if 'gamma' in sys.argv:
+        sim_triples.extend(vary_gamma())
+
+    if 'human' in sys.argv:
+        sim_triples.extend(vary_human())
+
+    if 'verifier' in sys.argv:
+        sim_triples.extend(vary_verifier())
+
+    if 'ranker' in sys.argv:
+        sim_triples.extend(vary_ranker())
+
+    for sim_params, ga_params, file_prefix in sim_triples:
+        one_simulation(out_path, file_prefix, sim_params, ga_params)

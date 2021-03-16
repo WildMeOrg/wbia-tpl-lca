@@ -74,6 +74,7 @@ class simulator(object):  # NOQA
         assuming an imperfect ranking algorithm, this does not ensure
         that each cluster is connected.
         """
+        num_from_ranker = self.params['num_from_ranker']
         cids = ct.cids_from_range(len(samples), prefix='ct')
         for i, cid in enumerate(cids):
             self.gt_clustering[cid] = list()
@@ -90,12 +91,15 @@ class simulator(object):  # NOQA
                 self.ranker_matches[node_id] = set()
 
             #  Create the positive edges between nodes in a cluster.
-            #  These are symmetric
+            #  These are symmetric. Don't allow more than num_from_ranker
+            #  matches / edges for any node.
             for i, ith_node in enumerate(self.gt_clustering[cid]):
                 for j in range(i + 1, len(self.gt_clustering[cid])):
                     prob = random.uniform(0, 1)
                     jth_node = self.gt_clustering[cid][j]
-                    if prob < self.params['p_ranker_correct']:
+                    if prob < self.params['p_ranker_correct'] and \
+                       len(self.ranker_matches[ith_node]) < num_from_ranker and \
+                       len(self.ranker_matches[jth_node]) < num_from_ranker:
                         self.ranker_matches[ith_node].add(jth_node)
                         self.ranker_matches[jth_node].add(ith_node)
                         is_match_correct = True
@@ -110,7 +114,6 @@ class simulator(object):  # NOQA
                         e = (ith_node, jth_node, wgt)
                         edges.append(e)
 
-        num_from_ranker = self.params['num_from_ranker']
         assert num_from_ranker > 0
         num_nodes = len(nodes)
 
@@ -129,21 +132,15 @@ class simulator(object):  # NOQA
             cid = self.gt_node2cid[ith_node]
             cluster = set(self.gt_clustering[cid])
 
-            """ In the rare case that there are too many correct
-                matches, i.e. for an extremely large cluster, trim them out
             """
-            while len(matches) > num_from_ranker:
-                matches.pop()
-
+            Generate (incorrec)t edges between clusters
             """
-            Generate edges between clusters
-            """
+            is_match_correct = False
             while len(matches) < num_from_ranker:
                 j = random.randint(0, num_nodes - 1)
                 jth_node = nodes[j]
                 if jth_node not in matches and jth_node not in cluster:
                     matches.add(jth_node)
-                    is_match_correct = False
                     wgt = self.wgtr.random_wgt(is_match_correct)
                     if wgt > 0:
                         num_incorrect_positive += 1
@@ -446,7 +443,6 @@ def find_np_ratio(gamma_shape, gamma_scale, ranker_per_node, prob_match):
             std_dev,
         )
     )
-
     limit = int(mean + 10 * std_dev)
 
     pos_per_node = 0
@@ -474,36 +470,6 @@ def find_np_ratio(gamma_shape, gamma_scale, ranker_per_node, prob_match):
         % (neg_per_node, pos_per_node, ratio)
     )
     return ratio
-
-
-"""
-def find_np_ratio(num_clusters, nodes_per_cluster, ranker_per_node,
-                  prob_match):
-    '''
-    Given: (a) the number of clusters, (b) the expected number of
-    nodes per cluster, (c) the number of matching produced by the
-    ranking algorithm for each node, and (d) the probability that a
-    correct match is formed between a pair of nodes that should match,
-    find the expected ratio of negative edges to positive edges.
-    '''
-    logger.info('nodes_per_cluster %s' % (nodes_per_cluster, ))
-    lmbd = 1 / (nodes_per_cluster - 1)
-    limit = 1 + round(15 / lmbd)
-
-    pos_per_cluster = 0
-    for i in range(2, limit+1):
-        p = m.exp(-lmbd * (i-1.5)) - m.exp(-lmbd * (i-0.5))
-        prs = i*(i-1) / 2 * prob_match
-        prs = min(prs, i*ranker_per_node)
-        pos = p * prs
-        pos_per_cluster += pos
-        logger.info(i, prs, pos, pos_per_cluster)
-
-    neg_per_cluster = nodes_per_cluster * ranker_per_node - pos_per_cluster
-    logger.info("pos_per_cluster:", pos_per_cluster, ", neg_per_cluster:", neg_per_cluster)
-    ratio = neg_per_cluster / pos_per_cluster
-    return ratio
-"""
 
 
 def test_find_np_ratio():
