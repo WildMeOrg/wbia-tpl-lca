@@ -462,12 +462,18 @@ class graph_algorithm(object):  # NOQA
                     self.G, self.clustering, self.node2cid, iter_num
                 )
 
+            num_human = self.weight_mgr.num_human_decisions()
             if self.trace_iter_compare_to_gt_cb is not None:
-                num_human = self.weight_mgr.num_human_decisions()
                 self.trace_iter_compare_to_gt_cb(
                     self.clustering, self.node2cid, num_human
                 )
 
+            if 'max_human_decisions' in self.params and \
+               num_human > self.params['max_human_decisions']:
+                logger.info('Surpassed maximum number of human decisions with %d'
+                            % num_human)
+                converged = True
+            
         return (should_pause, iter_num, converged)
 
     def apply_lca(self, a):
