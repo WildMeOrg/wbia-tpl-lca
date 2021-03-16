@@ -70,8 +70,8 @@ class weighter(object):  # NOQA
         the scorer to get positive and negative histogram values.
         """
         hp, hn = self.scorer.get_pos_neg(s)
-        epsilon = 0.000001  # to prevent overflow
-        ratio = hp / (hn + epsilon)
+        epsilon = 0.000001  # to prevent underflow / overflow
+        ratio = (hp + epsilon) / (hn + epsilon)
         wgt = m.log(ratio)
         return wgt
 
