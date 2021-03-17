@@ -31,7 +31,7 @@ logger = logging.getLogger('wbia_lca')
 
 
 class db_interface(object):  # NOQA
-    def __init__(self, edges, clustering, db_add_on_init=True):
+    def __init__(self, edges, clustering, db_add_on_init=True, ibs=None):
         super(db_interface, self).__init__()
 
         self.edge_graph = nx.Graph()
@@ -39,6 +39,7 @@ class db_interface(object):  # NOQA
 
         self.clustering = clustering
         self.node_to_cid = ct.build_node_to_cluster_mapping(self.clustering)
+        self.ibs = ibs
 
     def add_edges(self, quads, db_add=True):
         """

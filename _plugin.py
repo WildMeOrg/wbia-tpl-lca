@@ -458,7 +458,7 @@ class LCAActor(GraphActor):
         >>> actor.infr.dump_logs()
 
     Doctest:
-        >>> # xdoctest: +REQUIRES(module:wbia_cnn, --slow)
+        >>> # DISABLE_DOCTEST
         >>> from wbia.web.graph_server import *
         >>> import wbia
         >>> actor = LCAActor()
