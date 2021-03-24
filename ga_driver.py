@@ -27,7 +27,7 @@ algorithms.
 
 What's needed?
 
-There are two primary ways that a run of the graph algorithm is
+There are three primary ways that a run of the graph algorithm is
 triggered:
 
 (1) Addition of new edges from the verification algorithm following
@@ -305,9 +305,6 @@ class ga_driver(object):  # NOQA
                     clustering[cid] = nodes_in_c
                     nodes |= nodes_in_c
             edges = self.db.edges_between_nodes(nodes)
-            # logger.info('final set of nodes: %s' % (nodes, ))
-            # logger.info('resulting edges %s' % (edges, ))
-            # logger.info('clustering %s' % (clustering, ))
             ccPIC = (edges, clustering)
             self.ccPICs.append(ccPIC)
 
@@ -473,7 +470,6 @@ def test_ga_driver():
     }
 
     weighters = generate_weighters(ga_params, gt_probs)
-    logger.info(weighters)
     edge_gen = edge_generator.edge_generator(db, weighters[0])
 
     gad = ga_driver(
