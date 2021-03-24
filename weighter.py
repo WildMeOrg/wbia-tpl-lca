@@ -23,6 +23,7 @@ class weighter(object):  # NOQA
     def __init__(self, scorer, human_prob=0.98):
         self.scorer = scorer
         self.human_prob = human_prob
+        self.incomparable_weight = 0
         self.max_weight = 100  # should not change
         self.max_raw_weight = self.raw_wgt_(human_prob)
         logger.info(
@@ -38,6 +39,9 @@ class weighter(object):  # NOQA
 
     def human_wgt(self, is_marked_correct):
         """  Given a human decision, produce a weight """
+        if is_marked_correct is None:
+            return self.incomparable_weight
+
         if is_marked_correct:
             return self.max_weight
         else:

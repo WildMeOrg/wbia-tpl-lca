@@ -3,6 +3,9 @@ from wbia.control import controller_inject
 from wbia.constants import CONTAINERIZED, PRODUCTION  # NOQA
 from wbia import constants as const
 from wbia.web.graph_server import GraphClient, GraphActor
+from wbia.algo.graph.state import POSTV, NEGTV, INCMP, UNREV, UNKWN
+from wbia.algo.graph.core import _rectify_decision
+
 import numpy as np
 import logging
 import utool as ut
@@ -444,9 +447,6 @@ class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
         verbose=None,
         priority=None,
     ):
-        from wbia.algo.graph.core import _rectify_decision
-        from wbia.algo.graph.state import POSTV, NEGTV, UNREV
-
         aid1, aid2 = edge
         if evidence_decision is None:
             evidence_decision = UNREV
@@ -458,7 +458,10 @@ class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
             flag = True
         elif decision == NEGTV:
             flag = False
+        elif decision == INCMP:
+            flag = None
         else:
+            # UNREV, UNKWN
             return
 
         aid1_, aid2_ = str(aid1), str(aid2)
@@ -702,6 +705,9 @@ class LCAActor(GraphActor):
         return status
 
     def _candidate_edge_probs(actor, candidate_edges):
+        if len(candidate_edges) == 0:
+            return []
+
         task_probs = actor.infr._make_task_probs(candidate_edges)
         match_probs = list(task_probs['match_state']['match'])
         nomatch_probs = list(task_probs['match_state']['nomatch'])
@@ -720,17 +726,25 @@ class LCAActor(GraphActor):
 
         return candidate_probs
 
-    def _refresh_data(actor, warmup=False):
-        from wbia.algo.graph.state import POSTV, NEGTV, INCMP, UNREV
-
+    def _refresh_data(actor, warmup=False, desired_states=None):
         aids_set = set(actor.infr.aids)
 
+        if desired_states is None:
+            desired_states = [POSTV, NEGTV, INCMP, UNREV, UNKWN]
+
         # Run LNBNN to find matches
-        desired_states = [POSTV, NEGTV, INCMP, UNREV]
-        candidate_edges = actor.infr.find_lnbnn_candidate_edges(
-            desired_states=desired_states,
-            can_match_samename=True,
-        )
+        candidate_edges = []
+        for desired_state in desired_states:
+            candidate_edges += actor.infr.find_lnbnn_candidate_edges(
+                desired_states=[desired_state],
+                can_match_samename=True,
+            )
+            candidate_edges += actor.infr.find_lnbnn_candidate_edges(
+                desired_states=[desired_state],
+                can_match_samename=False,
+            )
+
+        candidate_edges = list(set(candidate_edges))
 
         logger.info('LNBNN %d candidate edges' % (len(candidate_edges),))
 
@@ -799,7 +813,7 @@ class LCAActor(GraphActor):
             logger.info('WARMUP: Computing warmup data')
 
             # We are still in warm-up, need to ask user for reviews
-            warmup_data = actor._refresh_data(warmup=True)
+            warmup_data = actor._refresh_data(warmup=True, desired_states=[UNREV])
             candidate_edges, candidate_probs = warmup_data
             candidate_probs_ = list(map(int, np.around(np.array(candidate_probs) * 10.0)))
 
@@ -832,8 +846,6 @@ class LCAActor(GraphActor):
 
         actor.phase = 1
         actor.loop_phase = 'driver'
-
-        yield []
 
         if actor.driver is None:
             # Get driver data
