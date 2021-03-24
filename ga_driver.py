@@ -53,15 +53,15 @@ Three major data objects are created here prior to running the GA.
 (2) the weighters
 (3) the list of ccPIC (connected component of Potentially-Impacted Clusters):
   each is a pair containing a list of subgraph edges and a dictionary of the
-  subclustering.  Note that this subclustering will be empty if the edges are
+  sub-clustering.  Note that this sub-clustering will be empty if the edges are
   all between nodes that have not been clustered already.
 
 Not created by functionality here are
 (1) the database interface object and
 (2) the edge_generator object
 Both are created separately based on the source of the data for the
-graph algorithm, whether it be from similulation or from a true animal
-id database and real human deciders. There are abstract base class
+graph algorithm, whether it be from simulation or from a true animal
+id database and real human reviewers. There are abstract base class
 interfaces to these.  See overall_driver.py for examples of creating
 these for simulations.
 
@@ -72,7 +72,7 @@ and negative decisions and verification results, create the parameters
 dictionary and the weighter objects.
 
 2. Form the ga_driver. Based on the query and the current ID graph,
-the constructor produces a list of "ccPICs" (connected compontent of
+the constructor produces a list of "ccPICs" (connected component of
 potentially impacted clusters). These are independent subgraphs that
 could change. LCA is run on each separately. Each ccPIC contains the
 list of edges and the list of current clusters.
@@ -83,7 +83,7 @@ list of edges and the list of current clusters.
 4. The main result of the graph algorithm is a list of cluster_change
 objects (see compare_clusterings.py). At the point at which the graph
 algorithm runs end, no change in the clusterings will have yet been
-commmitted to the database. (However, during the running of LCA new
+committed to the database. (However, during the running of LCA new
 edges are created.)
 
 5. The last step is committing the cluster changes. These depend on
@@ -201,6 +201,7 @@ class ga_driver(object):  # NOQA
         db,
         edge_gen,
         ga_params,
+        db_add_on_init=True,
     ):
         logger.info('=============================================')
         logger.info('Start of graph algorithm overall driver which')
@@ -215,9 +216,13 @@ class ga_driver(object):  # NOQA
         self.edge_gen = edge_gen
         self.ga_params = ga_params
 
-        self.edge_quads = self.edge_gen.new_edges_from_verifier(
-            verifier_results
-        ) + self.edge_gen.new_edges_from_human(human_decisions)
+        self.edge_quads = []
+        self.edge_quads += self.edge_gen.new_edges_from_verifier(
+            verifier_results, db_add=db_add_on_init
+        )
+        self.edge_quads += self.edge_gen.new_edges_from_human(
+            human_decisions, db_add=db_add_on_init
+        )
         logger.info('Formed incoming graph edge quads to initiate LCA:')
         for q in self.edge_quads:
             logger.info('   (%a, %a, %d, %s)' % (q[0], q[1], q[2], q[3]))
@@ -316,7 +321,7 @@ class ga_driver(object):  # NOQA
         for e, c in self.ccPICs:
             logger.info('    %d edges involving %d current clusters' % (len(e), len(c)))
 
-    def run_ga_on_ccPIC(self, ccPIC_edges, ccPIC_clustering):
+    def run_ga_on_ccPIC(self, ccPIC_edges, ccPIC_clustering, return_on_paused=False):
         gai = ga.graph_algorithm(
             ccPIC_edges,
             ccPIC_clustering.values(),
@@ -330,7 +335,7 @@ class ga_driver(object):  # NOQA
         Add call backs for removing nodes, pausing, getting intermediate
         results, and getting the status.
         """
-        gai.set_remove_nodes_cb(self.edge_gen.remove_nodes_cb)
+        # gai.set_remove_nodes_cb(self.edge_gen.remove_nodes_cb)
 
         """
         Could add other callbacks, such as
@@ -353,6 +358,8 @@ class ga_driver(object):  # NOQA
             paused, iter_num, converged = gai.run_main_loop(
                 iter_num, iter_num + num_iter_to_run
             )
+            if paused and return_on_paused:
+                return None
 
         """
         Compute and then return the final information - the changes to
@@ -376,9 +383,13 @@ class ga_driver(object):  # NOQA
         logger.info('')
         return changes
 
-    def run_all_ccPICs(self):
+    def run_all_ccPICs(self, return_on_paused=False):
         for edges, clustering in self.ccPICs:
-            changes = self.run_ga_on_ccPIC(edges, clustering)
+            changes = self.run_ga_on_ccPIC(
+                edges, clustering, return_on_paused=return_on_paused
+            )
+            if changes is None:
+                return None
             self.changes_to_review.append(changes)
         return self.changes_to_review
 

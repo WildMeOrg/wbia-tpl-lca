@@ -15,7 +15,7 @@ and one set:
 . the done set of LCAs no longer under consideration
 
 All current LCAs must be in exactly one of the queues / sets at the
-start of each outer loop of the LCA algoritihm.
+start of each outer loop of the LCA algorithm.
 """
 
 import logging

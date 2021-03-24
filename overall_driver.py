@@ -26,17 +26,17 @@ Three key files are needed here:
 
 1. The configuration file.  See the config.ini example
 
-2. The json file of recent verifier ground truth positive and negative
+2. The JSON file of recent verifier ground truth positive and negative
 probability results. Note as a reminder that both the values of the
 probabilities AND the relative fraction of positive and negative
 ground truth samples are important here.
 
-3. The request json file, which includes the simulated database, the
+3. The request JSON file, which includes the simulated database, the
 simulated edge generator and the actual query request.  See
 request_example.json
 
 Note that the first two will always be needed even if this is running
-"for real", as will the actual query (with the request json).  So in
+"for real", as will the actual query (with the request JSON).  So in
 an non-simulation, only the database and edge generator object need to
 be replaced.
 """
@@ -44,8 +44,8 @@ be replaced.
 
 def form_database(request):
     """
-    From the request json object extract the database if it is there.
-    If not, return an empty database. The json includes edge quads
+    From the request JSON object extract the database if it is there.
+    If not, return an empty database. The JSON includes edge quads
     (n0, n1, w, aug_name) and a clustering dictionary.
     """
     edge_quads = []

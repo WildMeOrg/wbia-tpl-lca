@@ -77,7 +77,7 @@ the function called "run_main_loop". A subsequent call to
 run_main_loop will pick up cleanly from stop point.
 
 Once the algorithm is stopped, intermediate results and statuses can
-be checked and logged. These are implemented as direct emthod calls,
+be checked and logged. These are implemented as direct method calls,
 as outlined below.
 """
 
@@ -85,7 +85,7 @@ as outlined below.
 """
 Process start: run_main_loop
 
-Runs until either the algoriothm has converged, a maximum number of
+Runs until either the algorithm has converged, a maximum number of
 iterations has been reached, a stop has been requested, or the
 algorithm is waiting for too many augmentation edges.
 
@@ -114,7 +114,7 @@ other contributors if we merge into a large data set.  This is not
 necessarily the case: when a user's annotations are entered into the
 system and they are run against an indexing (ranking) algorithm, a
 subgraph should be constructed from the new annotations and the
-ranking matches. Work is focused only on these subgraphs. Morever,
+ranking matches. Work is focused only on these subgraphs. Moreover,
 requests for reviews can be ignored (algorithmically, before they
 reach the human) if they don't touch on the contributed annotations.
 
@@ -220,7 +220,7 @@ class graph_algorithm(object):  # NOQA
             self.draw_obj = draw_lca.draw_lca(self.params['drawing_prefix'])
 
         """  Need to set these callbacks to request and receive
-        information from the verfication algorithm and to do the same
+        information from the verification algorithm and to do the same
         from human reviewers. """
         self.remove_nodes_cb = None
         self.status_request_cb = None
@@ -466,12 +466,24 @@ class graph_algorithm(object):  # NOQA
                     self.clustering, self.node2cid, num_human
                 )
 
-            if 'max_human_decisions' in self.params and \
-               num_human > self.params['max_human_decisions']:
-                logger.info('Surpassed maximum number of human decisions with %d'
-                            % num_human)
+            if (
+                'max_human_decisions' in self.params
+                and num_human > self.params['max_human_decisions']
+            ):
+                logger.info(
+                    'Surpassed maximum number of human decisions with %d' % num_human
+                )
                 converged = True
-            
+
+        logger.info(
+            '*** Iteration %d Status Update - paused: %s, converged %s'
+            % (
+                iter_num,
+                should_pause,
+                converged,
+            )
+        )
+
         return (should_pause, iter_num, converged)
 
     def apply_lca(self, a):

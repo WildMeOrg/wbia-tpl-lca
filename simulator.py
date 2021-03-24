@@ -97,9 +97,11 @@ class simulator(object):  # NOQA
                 for j in range(i + 1, len(self.gt_clustering[cid])):
                     prob = random.uniform(0, 1)
                     jth_node = self.gt_clustering[cid][j]
-                    if prob < self.params['p_ranker_correct'] and \
-                       len(self.ranker_matches[ith_node]) < num_from_ranker and \
-                       len(self.ranker_matches[jth_node]) < num_from_ranker:
+                    if (
+                        prob < self.params['p_ranker_correct']
+                        and len(self.ranker_matches[ith_node]) < num_from_ranker
+                        and len(self.ranker_matches[jth_node]) < num_from_ranker
+                    ):
                         self.ranker_matches[ith_node].add(jth_node)
                         self.ranker_matches[jth_node].add(ith_node)
                         is_match_correct = True

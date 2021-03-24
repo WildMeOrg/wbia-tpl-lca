@@ -9,11 +9,15 @@ logger = logging.getLogger('wbia_lca')
 
 
 class edge_generator(object):  # NOQA
-    def __init__(self, db, wgtr):
+    def __init__(self, db, wgtr, controller=None):
         self.db = db
         self.wgtr = wgtr
+
+        self.controller = controller
+
         self.edge_requests = []  # triples (n0, n1, aug_name)
         self.edge_results = []  # quads (n0, n1, w, aug_name)
+        self.nodes_to_remove = []
 
     def wgt_from_verifier(self, p, vn):
         if vn == 'zero':
@@ -21,19 +25,19 @@ class edge_generator(object):  # NOQA
         else:
             return self.wgtr.wgt(p)
 
-    def new_edges_from_verifier(self, verifier_quads):
+    def new_edges_from_verifier(self, verifier_quads, db_add=True):
         edge_quads = [
             (n0, n1, self.wgt_from_verifier(p, vn), vn)
             for n0, n1, p, vn in verifier_quads
         ]
-        self.db.add_edges(edge_quads)
+        self.db.add_edges(edge_quads, db_add=db_add)
         return edge_quads
 
-    def new_edges_from_human(self, human_triples):
+    def new_edges_from_human(self, human_triples, db_add=True):
         edge_quads = [
             (n0, n1, self.wgtr.human_wgt(b), 'human') for n0, n1, b in human_triples
         ]
-        self.db.add_edges(edge_quads)
+        self.db.add_edges(edge_quads, db_add=db_add)
         return edge_quads
 
     def edge_request_cb(self, req_list):
@@ -43,6 +47,7 @@ class edge_generator(object):  # NOQA
         Some MAGIC NOW HAPPENS to turn these into results, with calls to
         the appropriate verification algorithms or human decision manager.
         """
+        self.edge_request_cb_async()
 
     def edge_result_cb(self, node_set=None):
         """
@@ -65,7 +70,12 @@ class edge_generator(object):  # NOQA
         removed. Return this list.
         """
         to_remove = []
-        for n in node_set:
-            to_remove.append(n)
-            self.db.remove_node(n)
+        for n in self.nodes_to_remove:
+            if n in node_set:
+                to_remove.append(n)
+                self.db.remove_node(n)
+        self.nodes_to_remove.clear()
         return to_remove
+
+    def edge_request_cb_async(self):
+        raise NotImplementedError()

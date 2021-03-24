@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import matplotlib.pyplot as plt
 import os
 import sys
@@ -20,14 +21,13 @@ def plot_accuracy(csv_files, out_name):
     ax1.set_xlabel('Number of human decisions')
     ax1.set_ylabel('Number of correct clusters')
 
-    combined_pairs = []
+    # combined_pairs = []
     for fn in csv_files:
         nh, acc = extract_from_csv(fn)
         _, tail = os.path.split(fn)
         prefix = tail.split('.')[0]
         ax1.plot(nh, acc, label=prefix)
     ax1.legend()
-        
 
     if out_name is None:
         plt.show()

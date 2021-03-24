@@ -2,20 +2,22 @@
 from wbia.control import controller_inject
 from wbia.constants import CONTAINERIZED, PRODUCTION  # NOQA
 from wbia import constants as const
-from wbia.web.graph_server import GraphActor
+from wbia.web.graph_server import GraphClient, GraphActor
+import numpy as np
 import logging
 import utool as ut
 
+from wbia_lca import db_interface
+from wbia_lca import edge_generator
+
 import configparser
+import threading
+import random
 import json
 import sys
 
 from wbia_lca import ga_driver
 from wbia_lca import overall_driver
-
-from wbia_lca import _plugin_db_interface
-from wbia_lca import _plugin_edge_generator
-
 
 logger = logging.getLogger('wbia_lca')
 
@@ -247,190 +249,223 @@ def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
     return changes_to_review
 
 
-@register_ibs_method
-@register_api('/api/plugin/lca/wbia/', methods=['GET'])
-def wbia_plugin_lca_wbia(ibs, ga_config, verifier_gt, request, db_result=None):
-    r"""
-    Create an LCA graph algorithm object and run via WBIA
+class db_interface_wbia(db_interface.db_interface):  # NOQA
+    def __init__(self, ibs, aids):
+        self.ibs = ibs
+        self.aids = aids
 
-    Args:
-        ibs (IBEISController): wbia controller object
-        ga_config (str): graph algorithm config INI file
-        verifier_gt (str): json file containing verification algorithm ground truth
-        request (str): json file continain graph algorithm request info
-        db_result (str, optional): file to write resulting json database
+        _edges = self._get_existing_weights()
+        _clustering = self._get_existing_clustering()
+        super(db_interface_wbia, self).__init__(_edges, _clustering, db_add_on_init=False)
 
-    Returns:
-        object: changes_to_review
+    def _get_existing_weights(self):
+        aids_set = set(self.aids)
 
-    CommandLine:
-        python -m wbia_lca._plugin wbia_plugin_lca_wbia
-        python -m wbia_lca._plugin wbia_plugin_lca_wbia:0
+        weight_rowid_list = self.ibs._get_all_edge_weight_rowids()
+        weight_value_list = self.ibs.get_edge_weight_value(weight_rowid_list)
+        weight_identity_list = self.ibs.get_edge_weight_identity(weight_rowid_list)
 
-    RESTful:
-        Method: GET
-        URL:    /api/plugin/lca/wbia/
+        edges = []
+        for weight_rowid, weight_value, weight_identity in zip(
+            weight_rowid_list, weight_value_list, weight_identity_list
+        ):
+            aid1, aid2 = self.ibs.get_edge_weight_aid_tuple(weight_rowid)
+            if aid1 not in aids_set or aid2 not in aids_set:
+                continue
+            aid1_, aid2_ = str(aid1), str(aid2)
 
-    Doctest:
-        >>> # ENABLE_DOCTEST
-        >>> import wbia
-        >>> import utool as ut
-        >>> import random
-        >>> random.seed(1)
-        >>> from wbia.init import sysres
-        >>> dbdir = sysres.ensure_testdb_identification_example()
-        >>> ibs = wbia.opendb(dbdir=dbdir)
-        >>> ga_config = 'examples/default/config.ini'
-        >>> verifier_gt = 'examples/default/verifier_probs.json'
-        >>> request = 'examples/default/request_example.json'
-        >>> db_result = 'examples/default/result.json'
-        >>> changes_to_review = ibs.wbia_plugin_lca_wbia(ga_config, verifier_gt, request, db_result)
-        >>> results = []
-        >>> for cluster in changes_to_review:
-        >>>     lines = []
-        >>>     for change in cluster:
-        >>>         line = []
-        >>>         line.append('query nodes %s' % (sorted(change.query_nodes),))
-        >>>         line.append('change_type %s' % (change.change_type,))
-        >>>         line.append('old_clustering %s' % (sorted(change.old_clustering), ))
-        >>>         line.append('len(new_clustering) %s' % (len(sorted(change.new_clustering)), ))
-        >>>         line.append('removed_nodes %s' % (sorted(change.removed_nodes),))
-        >>>         lines.append('\n'.join(line))
-        >>>     results.append('\n-\n'.join(sorted(lines)))
-        >>> result = '\n----\n'.join(sorted(results))
-        >>> print('----\n%s\n----' % (result, ))
-    """
-    # 1. Configuration
-    config_ini = configparser.ConfigParser()
-    config_ini.read(ga_config)
+            if weight_identity.startswith('algo:'):
+                aug_name = 'vamp'
+            elif weight_identity.startswith('user:'):
+                aug_name = 'human'
+            else:
+                raise ValueError()
 
-    # 2. Recent results from verification ground truth tests. Used to
-    # establish the weighter.
-    with open(verifier_gt, 'r') as fn:
-        verifier_gt = json.loads(fn.read())
+            edge = (aid1_, aid2_, weight_value, aug_name)
+            edges.append(edge)
 
-    # 3. Form the parameters dictionary and weight objects (one per
-    # verification algorithm).
-    ga_params, wgtrs = ga_driver.params_and_weighters(config_ini, verifier_gt)
-    if len(wgtrs) > 1:
-        logger.info('Not currently handling more than one weighter!!')
-        sys.exit(1)
-    wgtr = wgtrs[0]
+        args = (
+            len(weight_rowid_list),
+            len(set(edges)),
+        )
+        logger.info('Found %d existing edge weights for %d unique edges' % args)
 
-    # 4. Get the request dictionary, which includes the database, the
-    # actual request edges and clusters, and the edge generator edges
-    # and ground truth (for simulation).
-    with open(request, 'r') as fn:
-        request = json.loads(fn.read())
+        return edges
 
-    db = form_database(request)
-    edge_gen = form_edge_generator(request, db, wgtr)
-    verifier_req, human_req, cluster_req = extract_requests(request, db)
+    def _get_existing_clustering(self):
+        aids = self.aids
+        nids = self.ibs.get_annot_nids(aids)
 
-    # 5. Form the graph algorithm driver
-    driver = ga_driver.ga_driver(
-        verifier_req, human_req, cluster_req, db, edge_gen, ga_params
-    )
+        clustering = {}
+        for aid, nid in zip(aids, nids):
+            aid_, nid_ = str(aid), str(nid)
+            if nid_ not in clustering:
+                clustering[nid_] = []
+            clustering[nid_].append(aid_)
 
-    # 6. Run it. Changes are logged.
-    changes_to_review = driver.run_all_ccPICs()
+        for nid in clustering:
+            clustering[nid] = sorted(clustering[nid])
 
-    # 7. Commit changes. Record them in the database and the log
-    # file.
-    # TBD
+        nids_ = set(map(str, nids))
+        assert len(clustering.keys() ^ nids_) == 0
 
-    return changes_to_review
+        args = (len(nids),)
+        logger.info('Retrieving clustering with %d names' % args)
 
+        return clustering
 
-def form_database(request, ibs=None):
-    """
-    From the request json object extract the database if it is there.
-    If not, return an empty database. The json includes edge quads
-    (n0, n1, w, aug_name) and a clustering dictionary.
-    """
-    from wbia_lca import db_interface_sim
+    def add_edges_db(self, quads):
+        aid_1_list = list(map(int, ut.take_column(quads, 0)))
+        aid_2_list = list(map(int, ut.take_column(quads, 1)))
+        value_list = ut.take_column(quads, 2)
+        aug_name_list = ut.take_column(quads, 3)
 
-    req_db = request.get('database', {})
+        identity_list = []
+        for aug_name in aug_name_list:
+            if aug_name == 'human':
+                identity = 'user:web'
+            elif aug_name == 'vamp':
+                identity = 'algo:vamp'
+            else:
+                raise ValueError()
+            identity_list.append(identity)
 
-    edge_quads = req_db.get('quads', [])
+        weight_rowid_list = self.ibs.add_edge_weight(
+            aid_1_list, aid_2_list, value_list, identity_list
+        )
+        return weight_rowid_list
 
-    clustering_dict = req_db.get('clustering', {})
-    clustering_dict = {str(cid): c for cid, c in clustering_dict.items()}
+    def get_weight_db(self, triple):
+        raise RuntimeError('This should never need to be executed')
 
-    db = db_interface_sim.db_interface_sim(edge_quads, clustering_dict, ibs=ibs)
-    return db
+        n0, n1, aug_name = triple
 
+        n0_, n1_ = int(n0), int(n1)
+        edges = [(n0_, n1_)]
+        weight_rowid_list = self.ibs.get_edge_weight_rowids_from_edges(edges)[0]
+        weight_rowid_list = sorted(weight_rowid_list)
 
-def form_edge_generator(request, db, wgtr):
-    """
-    Form the edge generator object. Unlike the database, the generator
-    must be there for the small example / simulator to run.
-    """
-    from wbia_lca import edge_generator_sim
+        value_list = self.ibs.get_edge_weight_value(weight_rowid_list)
+        identity_list = self.ibs.get_edge_weight_identity(weight_rowid_list)
 
-    gen_dict = request.get('generator', None)
+        weight = []
+        for value, identity in zip(value_list, identity_list):
+            if aug_name == 'human':
+                if identity.startswith('human:'):
+                    weight.append(value)
+            else:
+                weight = [value]
 
-    try:
-        assert gen_dict is not None
-    except AssertionError:
-        logger.info('Information about the edge generator must be in the request.')
-        sys.exit(1)
+        weight = None if len(weight) == 0 else sum(weight)
 
-    # Get hand-specified results from the verifier that aren't in the
-    # database yet. These are prob_quads of the form (n0, n1, prob,
-    # aug_name).  The weighter will be used to turn the prob into a
-    # weight.
-    prob_quads = gen_dict.get('verifier', [])
+        return weight
 
-    # Get human decisions of the form (n0, n1, bool). These will be
-    # returned as new edges when first requested
-    human_triples = gen_dict.get('human', [])
+    def edges_from_attributes_db(self, n0, n1):
+        n0_, n1_ = int(n0), int(n1)
+        edges = [(n0_, n1_)]
+        weight_rowid_list = self.ibs.get_edge_weight_rowids_from_edges(edges)[0]
+        weight_rowid_list = sorted(weight_rowid_list)
 
-    # Get the ground truth clusters - used to generate edges that
-    # aren't listed explicitly
-    gt_clusters = gen_dict.get('gt_clusters', [])
+        aid_1_list = [n0] * len(weight_rowid_list)
+        aid_2_list = [n1] * len(weight_rowid_list)
+        value_list = self.ibs.get_edge_weight_value(weight_rowid_list)
+        identity_list = self.ibs.get_edge_weight_identity(weight_rowid_list)
 
-    # Get the nodes to be removed early in the computation.
-    nodes_to_remove = gen_dict.get('nodes_to_remove', [])
+        aug_name_list = []
+        for identity in identity_list:
+            if identity.startswith('algo:'):
+                aug_name = 'vamp'
+            elif identity.startswith('user:'):
+                aug_name = 'human'
+            else:
+                raise ValueError()
+            aug_name_list.append(aug_name)
 
-    # Get the number of steps between returning edge generation
-    # results. If this value is 0 then they are returned immediately
-    # upon request.
-    delay_steps = gen_dict.get('delay_steps', 0)
+        quads = list(zip(aid_1_list, aid_2_list, value_list, aug_name_list))
 
-    edge_gen = edge_generator_sim.edge_generator_sim(
-        db, wgtr, prob_quads, human_triples, gt_clusters, nodes_to_remove, delay_steps
-    )
-    return edge_gen
+        return quads
+
+    def commit_cluster_change_db(self, cc):
+        raise NotImplementedError()
 
 
-def extract_requests(request, db):
-    req_dict = request.get('query', None)
+class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
+    def edge_request_cb_async(self):
+        actor = self.controller
 
-    try:
-        assert req_dict is not None
-    except AssertionError:
-        logger.info('Information about the GA query itself must be in the request JSON.')
-        sys.exit(1)
+        requested_vamp_edges = []
+        keep_edge_requests = []
+        for edge in self.edge_requests:
+            aid1_, aid2_, aug_name = edge
+            if aug_name == 'vamp':
+                aid1, aid2 = int(aid1_), int(aid2_)
+                requested_vamp_edges.append((aid1, aid2))
+            else:
+                keep_edge_requests.append(edge)
 
-    # 1. Get the verifier result quads (n0, n1, prob, aug_name).
-    verifier_results = req_dict.get('verifier', [])
+        requested_vamp_probs = actor._candidate_edge_probs(requested_vamp_edges)
 
-    # 2. Get the human decision result triples (n0, n1, bool)
-    # No error checking is used
-    human_decisions = req_dict.get('human', [])
+        verifier_quads = []
+        for edge, prob in zip(requested_vamp_edges, requested_vamp_probs):
+            aid1, aid2 = edge
+            aid1_, aid2_ = str(aid1), str(aid2)
+            verifier_quad = (aid1_, aid2_, prob, 'vamp')
+            verifier_quads.append(verifier_quad)
 
-    # 3. Get the list of existing cluster ids to check
-    cluster_ids_to_check = req_dict.get('cluster_ids', [])
+        new_edge_results = self.new_edges_from_verifier(verifier_quads)
+        self.edge_results += new_edge_results
+        self.edge_requests = keep_edge_requests
 
-    for cid in cluster_ids_to_check:
-        logger.info(cid)
-        logger.info(cluster_ids_to_check)
-        if not db.cluster_exists(cid):
-            logger.info('GA request cluster id %s does not exist' % cid)
-            raise ValueError('Cluster id does not exist')
+        args = (
+            len(requested_vamp_edges),
+            len(new_edge_results),
+            len(self.edge_results),
+            len(keep_edge_requests),
+        )
+        logger.info(
+            'Received %d VAMP edge requests, added %d new results for %d total, kept %d requests in queue'
+            % args
+        )
 
-    return verifier_results, human_decisions, cluster_ids_to_check
+    def add_feedback(
+        self,
+        edge,
+        evidence_decision=None,
+        tags=None,
+        user_id=None,
+        meta_decision=None,
+        confidence=None,
+        timestamp_c1=None,
+        timestamp_c2=None,
+        timestamp_s1=None,
+        timestamp=None,
+        verbose=None,
+        priority=None,
+    ):
+        from wbia.algo.graph.core import _rectify_decision
+        from wbia.algo.graph.state import POSTV, NEGTV, UNREV
+
+        aid1, aid2 = edge
+        if evidence_decision is None:
+            evidence_decision = UNREV
+        if meta_decision is None:
+            meta_decision = const.META_DECISION.CODE.NULL
+        decision = _rectify_decision(evidence_decision, meta_decision)
+
+        if decision == POSTV:
+            flag = True
+        elif decision == NEGTV:
+            flag = False
+        else:
+            return
+
+        aid1_, aid2_ = str(aid1), str(aid2)
+
+        human_triples = [
+            (aid1_, aid2_, flag),
+        ]
+        new_edge_results = self.new_edges_from_human(human_triples)
+        self.edge_results += new_edge_results
 
 
 class LCAActor(GraphActor):
@@ -443,318 +478,423 @@ class LCAActor(GraphActor):
 
     Doctest:
         >>> # DISABLE_DOCTEST
-        >>> from wbia.web.graph_server import *
+        >>> from wbia.web.graph_server import _testdata_feedback_payload
+        >>> import wbia
         >>> actor = LCAActor()
-        >>> payload = testdata_start_payload()
         >>> # Start the process
+        >>> # dbdir = wbia.sysres.db_to_dbdir('GZ_CensusAnnotation_Eval')
+        >>> dbdir = wbia.sysres.db_to_dbdir('PZ_MTEST')
+        >>> payload = {'action': 'start', 'dbdir': dbdir, 'aids': 'all'}
         >>> start_resp = actor.handle(payload)
         >>> print('start_resp = {!r}'.format(start_resp))
         >>> # Respond with a user decision
-        >>> user_request = actor.handle({'action': 'continue_review'})
+        >>> user_request = actor.handle({'action': 'resume'})
         >>> # Wait for a response and the LCAActor in another proc
         >>> edge, priority, edge_data = user_request[0]
         >>> user_resp_payload = _testdata_feedback_payload(edge, 'match')
         >>> content = actor.handle(user_resp_payload)
-        >>> actor.infr.dump_logs()
-
-    Doctest:
-        >>> # DISABLE_DOCTEST
-        >>> from wbia.web.graph_server import *
-        >>> import wbia
-        >>> actor = LCAActor()
-        >>> config = {
-        >>>     'manual.n_peek'   : 1,
-        >>>     'manual.autosave' : False,
-        >>>     'ranking.enabled' : False,
-        >>>     'autoreview.enabled' : False,
-        >>>     'redun.enabled'   : False,
-        >>>     'redun.enabled'   : False,
-        >>>     'queue.conf.thresh' : 'absolutely_sure',
-        >>>     'algo.hardcase' : True,
-        >>> }
-        >>> # Start the process
-        >>> dbdir = wbia.sysres.db_to_dbdir('PZ_MTEST')
-        >>> payload = {'action': 'start', 'dbdir': dbdir, 'aids': 'all',
-        >>>            'config': config, 'init': 'annotmatch'}
-        >>> start_resp = actor.handle(payload)
-        >>> print('start_resp = {!r}'.format(start_resp))
-        >>> # Respond with a user decision
-        >>> user_request = actor.handle({'action': 'continue_review'})
-        >>> print('user_request = {!r}'.format(user_request))
-        >>> # Wait for a response and  the LCAActor in another proc
-        >>> edge, priority, edge_data = user_request[0]
-        >>> user_resp_payload = _testdata_feedback_payload(edge, 'match')
-        >>> content = actor.handle(user_resp_payload)
-        >>> actor.infr.dump_logs()
-        >>> actor.infr.status()
     """
 
     def __init__(actor, *args, **kwargs):
-        actor.db = None
         actor.infr = None
-        actor.edge_gen = None
 
-        actor.request_queue = None
-        actor.result_queue = None
+        actor.warmup = True
+
+        actor.db = None
+        actor.edge_gen = None
+        actor.driver = None
+        actor.changes = None
+
+        actor.resume_lock = threading.Lock()
+
+        # fmt: off
+        actor.ga_params = {
+            'aug_names': [
+                'vamp',
+                'human',
+            ],
+            'prob_human_correct': 0.97,
+
+            'min_delta_converge_multiplier': 0.95,
+            'min_delta_stability_ratio': 8,
+            'num_per_augmentation': 2,
+
+            # 'tries_before_edge_done': 4,
+            'tries_before_edge_done': 100,
+
+            'ga_iterations_before_return': 10,
+            'ga_max_num_waiting': 30,
+
+            'log_level': logging.INFO,
+            'draw_iterations': False,
+            'drawing_prefix': 'wbia_lca',
+        }
+
+        actor.config = {
+            'manual.n_peek': 50,
+            'weighter_required_reviews': 10,
+            'weighter_recent_reviews': 50,
+            # 'weighter_required_reviews': 50,
+            # 'weighter_recent_reviews': 1000,
+            'init_nids': [],
+        }
+        # fmt: on
 
         super(LCAActor, actor).__init__(*args, **kwargs)
 
-    def start(actor, dbdir, aids='all', config={}, **kwargs):
+    def _init_infr(actor, aids, dbdir, **kwargs):
         import wbia
 
-        ut.embed()
-
         assert dbdir is not None, 'must specify dbdir'
-        assert actor.db is None, 'LCA database already running'
+        assert actor.infr is None, 'AnnotInference already running'
         ibs = wbia.opendb(dbdir=dbdir, use_cache=False, web=False, force_serial=True)
 
-        if aids == 'all':
-            aids = ibs.get_valid_aids()
+        weight_rowid_list = ibs._get_all_edge_weight_rowids()
+        ibs.delete_edge_weight(weight_rowid_list)
 
-        # Create the AnnotInference
+        # Create the reference AnnotInference
         logger.info('starting via actor with ibs = %r' % (ibs,))
         actor.infr = wbia.AnnotInference(ibs=ibs, aids=aids, autoinit=True)
         actor.infr.print('started via actor')
-        actor.infr.print('config = {}'.format(ut.repr3(config)))
-        # Configure query_annot_infr
-        for key in config:
-            actor.infr.params[key] = config[key]
+        actor.infr.print('config = {}'.format(ut.repr3(actor.config)))
 
-        # Initialize
-        # TODO: Initialize state from staging reviews after annotmatch
-        # timestamps (in case of crash)
+        # Configure
+        for key in actor.config:
+            actor.infr.params[key] = actor.config[key]
 
-        # Load random forests (TODO: should this be config specifiable?)
+        # Pull reviews from staging
+        actor.infr.print('Initializing infr tables')
+        table = kwargs.get('init', 'staging')
+        actor.infr.reset_feedback(table, apply=True)
+        actor.infr.ensure_mst()
+        actor.infr.apply_nondynamic_update()
+
+        actor.infr.print('infr.status() = {}'.format(ut.repr4(actor.infr.status())))
+
+        # Load VAMP models
         actor.infr.print('loading published models')
+        actor.infr.load_published()
+
+        assert actor.infr is not None
+
+    def _init_weighter(actor):
+        logger.info('Attempting to warmup (_init_weighter)')
+
+        assert actor.infr is not None
+
+        review_rowids = actor.infr.ibs._get_all_review_rowids()
+        review_rowids = sorted(review_rowids)
+        review_edges = actor.infr.ibs.get_review_aid_tuple(review_rowids)
+        review_decisions = actor.infr.ibs.get_review_decision(review_rowids)
+        review_identities = actor.infr.ibs.get_review_identity(review_rowids)
+        logger.info('Fetched %d reviews' % (len(review_rowids),))
+
+        verifier_edges = {
+            'vamp': {
+                'gt_positive_probs': [],
+                'gt_negative_probs': [],
+            }
+        }
+        for review_edge, review_decision, review_identity in zip(
+            review_edges, review_decisions, review_identities
+        ):
+            if review_decision == const.EVIDENCE_DECISION.POSITIVE:
+                key = 'gt_positive_probs'
+            elif review_decision == const.EVIDENCE_DECISION.NEGATIVE:
+                key = 'gt_negative_probs'
+            else:
+                key = None
+
+            if not review_identity.startswith('user:'):
+                key = None
+
+            if key is not None:
+                verifier_edges['vamp'][key].append(review_edge)
+
+        verifier_gt = {}
+        for algo in verifier_edges:
+            verifier_gt[algo] = {}
+            for key in verifier_edges[algo]:
+                edges = verifier_edges[algo][key]
+                num_edges = len(edges)
+                min_edges = actor.config.get('weighter_required_reviews')
+                max_edges = actor.config.get('weighter_recent_reviews')
+                logger.info(
+                    'Found %d review edges for %s %s'
+                    % (
+                        num_edges,
+                        algo,
+                        key,
+                    )
+                )
+                if num_edges < min_edges:
+                    args = (
+                        key,
+                        num_edges,
+                        min_edges,
+                    )
+                    logger.info('WARMUP failed: key %r has %d edges, needs %d' % args)
+                    # return False
+                    verifier_gt[algo][key] = [1.0]
+                    continue
+
+                thresh_edges = -1 * min(num_edges, max_edges)
+                edges = edges[thresh_edges:]
+                verifier_gt[algo][key] = actor._candidate_edge_probs(edges)
+
+        wgtrs = ga_driver.generate_weighters(actor.ga_params, verifier_gt)
+        actor.wgtr = wgtrs[0]
+
+        human_gt_positive_weight = actor.wgtr.human_wgt(is_marked_correct=True)
+        human_gt_negative_weight = actor.wgtr.human_wgt(is_marked_correct=False)
+        human_gt_delta_weight = human_gt_positive_weight - human_gt_negative_weight
+        multiplier = actor.ga_params['min_delta_converge_multiplier']
+        ratio = actor.ga_params['min_delta_stability_ratio']
+        convergence = -1.0 * multiplier * human_gt_delta_weight
+        actor.ga_params['min_delta_score_converge'] = convergence
+        actor.ga_params['min_delta_score_stability'] = convergence / ratio
+
+        return True
+
+    def _init_lca(actor):
+        # Initialize the weighter
+        success = actor._init_weighter()
+        if not success:
+            return
+
+        # Initialize the DB
+        actor.db = db_interface_wbia(actor.infr.ibs, actor.infr.aids)
+
+        # Initialize the Edge Generator
+        actor.edge_gen = edge_generator_wbia(actor.db, actor.wgtr, controller=actor)
+
+        # We have warmed up
+        actor.warmup = False
+
+    def start(actor, dbdir, aids='all', config={}, **kwargs):
+        actor.config.update(config)
+
+        # Initialize INFR
+        actor._init_infr(aids, dbdir, **kwargs)
+
+        # Initialize LCA
+        actor._init_lca()
+
+        # Initialize the review iterator
+        actor._gen = actor.main_gen()
+
+        status = 'warmup' if actor.warmup else 'initialized'
+        return status
+
+    def _candidate_edge_probs(actor, candidate_edges):
+        task_probs = actor.infr._make_task_probs(candidate_edges)
+        match_probs = list(task_probs['match_state']['match'])
+        nomatch_probs = list(task_probs['match_state']['nomatch'])
+
+        candidate_probs = []
+        for match_prob, nomatch_prob in zip(match_probs, nomatch_probs):
+            prob = 0.5 + (match_prob - nomatch_prob) / 2
+            candidate_probs.append(prob)
+
+        num_probs = len(candidate_probs)
+        min_probs = None if num_probs == 0 else '%0.04f' % (min(candidate_probs),)
+        max_probs = None if num_probs == 0 else '%0.04f' % (max(candidate_probs),)
+
+        args = (num_probs, min_probs, max_probs)
+        logger.info('VAMP probabilities on %d edges (range: %s - %s)' % args)
+
+        return candidate_probs
+
+    def _refresh_data(actor, warmup=False):
+        from wbia.algo.graph.state import POSTV, NEGTV, INCMP, UNREV
+
+        aids_set = set(actor.infr.aids)
+
+        # Run LNBNN to find matches
+        desired_states = [POSTV, NEGTV, INCMP, UNREV]
+        candidate_edges = actor.infr.find_lnbnn_candidate_edges(
+            desired_states=desired_states
+        )
+
+        logger.info('LNBNN %d candidate edges' % (len(candidate_edges),))
+
+        # Run VAMP on candidates
+        candidate_probs = actor._candidate_edge_probs(candidate_edges)
+
+        # Requested warm-up, return this data immediately
+        if warmup:
+            warmup_data = candidate_edges, candidate_probs
+            return warmup_data
+
+        # Collect verifier results from LNBNN matches and VAMP scores
+        verifier_results = []
+        for candidate_edge, candidate_prob in zip(candidate_edges, candidate_probs):
+            aid1, aid2 = candidate_edge
+            assert aid1 in aids_set and aid2 in aids_set
+            aid1_, aid2_ = str(aid1), str(aid2)
+            verifier_result = (aid1_, aid2_, candidate_prob, 'vamp')
+            verifier_results.append(verifier_result)
+
+        # Get existing reviews from staging
+        review_rowids = actor.infr.ibs._get_all_review_rowids()
+        review_rowids = sorted(review_rowids)
+        review_decisions = actor.infr.ibs.get_review_decision(review_rowids)
+        review_edges = actor.infr.ibs.get_review_aid_tuple(review_rowids)
+
+        # Collect human decisions from existing reviews
+        human_decisions = []
+        for review_decision, review_edge in zip(review_decisions, review_edges):
+            if review_decision == const.EVIDENCE_DECISION.POSITIVE:
+                flag = True
+            elif review_decision == const.EVIDENCE_DECISION.NEGATIVE:
+                flag = False
+            else:
+                continue
+            aid1, aid2 = review_edge
+            if aid1 not in aids_set or aid2 not in aids_set:
+                continue
+            aid1_, aid2_ = str(aid1), str(aid2)
+            human_decision = (aid1_, aid2_, flag)
+            human_decisions.append(human_decision)
+
+        # Get the clusters to check
+        cluster_ids_to_check = actor.config.get('init_nids')
+
+        driver_data = verifier_results, human_decisions, cluster_ids_to_check
+        return driver_data
+
+    def _make_review_tuple(actor, edge, priority=None):
+        """ Makes tuple to be sent back to the user """
+        edge_data = {}
+        return (edge, priority, edge_data)
+
+    def main_gen(actor):
+        if actor.warmup:
+            logger.info('WARMUP: Computing warmup data')
+
+            # We are still in warm-up, need to ask user for reviews
+            warmup_data = actor._refresh_data(warmup=True)
+            candidate_edges, candidate_probs = warmup_data
+            candidate_probs_ = list(map(int, np.around(np.array(candidate_probs) * 10.0)))
+
+            logger.info('WARMUP: Creating stratified buckets')
+            # Create stratified buckets based on probabilities
+            candidate_buckets = {}
+            for candidate_edge, candidate_prob_ in zip(candidate_edges, candidate_probs_):
+                if candidate_prob_ not in candidate_buckets:
+                    candidate_buckets[candidate_prob_] = []
+                candidate_buckets[candidate_prob_].append(candidate_edge)
+            buckets = list(candidate_buckets.keys())
+
+            num = actor.config.get('manual.n_peek')
+            user_request = []
+            for index in range(num):
+                bucket = random.choice(buckets)
+                edges = candidate_buckets[bucket]
+                edge = random.choice(edges)
+                args = (
+                    bucket,
+                    edge,
+                )
+                logger.info('WARMUP: bucket %r, edge %r' % args)
+                # Yield a bunch of random edges (from stratified buckets) to the user
+                user_request += [actor._make_review_tuple(edge, None)]
+            yield user_request
+
+        # Get driver data
+        assert not actor.warmup
+        driver_data = actor._refresh_data()
+        verifier_results, human_decisions, cluster_ids_to_check = driver_data
+
+        # Initialize the Driver
+        actor.driver = ga_driver.ga_driver(
+            verifier_results,
+            human_decisions,
+            cluster_ids_to_check,
+            actor.db,
+            actor.edge_gen,
+            actor.ga_params,
+            db_add_on_init=True,
+        )
+
+        changes_to_review = None
+        while True:
+            changes_to_review = actor.driver.run_all_ccPICs(return_on_paused=True)
+
+            if changes_to_review is not None:
+                break
+
+            requested_human_edges = []
+            keep_edge_requests = []
+            for edge in actor.edge_gen.edge_requests:
+                aid1_, aid2_, aug_name = edge
+                if aug_name == 'human':
+                    aid1, aid2 = int(aid1_), int(aid2_)
+                    requested_human_edges.append((aid1, aid2))
+                else:
+                    keep_edge_requests.append(edge)
+            actor.edge_gen.edge_requests = keep_edge_requests
+
+            args = (
+                len(requested_human_edges),
+                len(keep_edge_requests),
+            )
+            logger.info(
+                'Received %d human edge requests, kept %d requests in queue' % args
+            )
+
+            user_request = []
+            for edge in requested_human_edges:
+                user_request += [actor._make_review_tuple(edge, None)]
+
+            yield user_request
+
+        for cc in changes_to_review:
+            actor.db.commit_cluster_change(cc)
+
+        return None
+
+    def resume(actor):
+        with actor.resume_lock:
+            if actor._gen is None:
+                return 'finished:stopped'
+            try:
+                user_request = next(actor._gen)
+            except StopIteration:
+                actor._gen = None
+                user_request = 'finished:stopiteration'
+            return user_request
+
+    def feedback(actor, **feedback):
+        actor.infr.add_feedback(**feedback)
+        actor.infr.write_wbia_staging_feedback()
+        if actor.edge_gen is not None:
+            actor.edge_gen.add_feedback(**feedback)
+
+    def add_aids(actor, aids, **kwargs):
+        raise NotImplementedError()
+
+    def remove_aids(actor, aids, **kwargs):
+        raise NotImplementedError()
+
+    def logs(actor):
+        return 'no logs for LCA'
+
+    def status(actor):
+        infr_status = {}
         try:
-            actor.infr.load_published()
+            infr_status['phase'] = actor.lca.phase
         except Exception:
             pass
 
-        if False:
-            actor.infr.exec_matching(
-                name_method='edge',
-                cfgdict={
-                    'resize_dim': 'width',
-                    'dim_size': 700,
-                    'requery': True,
-                    'can_match_samename': False,
-                    'can_match_sameimg': False,
-                    # 'sv_on': False,
-                },
-            )
+        return infr_status
 
-            review_cfg = {}
+    def metadata(actor):
+        return {}
 
-            ranks_top = review_cfg.get('ranks_top', 5)
-            ranks_bot = review_cfg.get('ranks_bot', 0)
 
-            edges = []
-
-            for count, cm in enumerate(actor.infr.cm_list):
-                score_list = cm.annot_score_list
-                rank_list = ut.argsort(score_list)[::-1]
-                sortx = ut.argsort(rank_list)
-
-                top_sortx = sortx[:ranks_top]
-                bot_sortx = sortx[len(sortx) - ranks_bot :]
-                short_sortx = ut.unique(top_sortx + bot_sortx)
-
-                daid_list = ut.take(cm.daid_list, short_sortx)
-                for daid in daid_list:
-                    u, v = (cm.qaid, daid)
-                    if v < u:
-                        u, v = v, u
-                    edges.append((u, v))
-
-            probs = actor.infr._make_task_probs(edges)
-
-        aids_set = set(aids)
-
-        # 1. Configuration
-        # fmt: off
-        ga_params = {
-            'prob_human_correct': 0.97,
-            'aug_names': [
-                'vamp',
-                'human'
-            ],
-            'min_delta_converge_multiplier': 0.95,
-            'min_delta_stability_ratio': 8.0,
-            'num_per_augmentation': 2,
-            'tries_before_edge_done': 4,
-            'ga_iterations_before_return': 10,
-            'ga_max_num_waiting': 50,
-            'log_level': 'INFO',
-            'log_file': './lca.log',
-            'draw_iterations': False,
-            'drawing_prefix': 'drawing_lca'
-        }
-        # fmt: on
-
-        # 2. Recent results from verification ground truth tests. Used to
-        # establish the weighter.
-        # fmt: off
-        verifier_gt = {
-            'vamp': {
-                'gt_positive_probs': [
-                    0.96,
-                    0.45,
-                    0.98,
-                    0.67,
-                    0.87,
-                    0.38,
-                    0.92,
-                    0.83,
-                    0.77,
-                    0.91
-                ],
-                'gt_negative_probs': [
-                    0.11,
-                    0.04,
-                    0.61,
-                    0.33,
-                    0.25,
-                    0.05,
-                    0.12,
-                    0.51,
-                    0.15,
-                    0.25,
-                    0.31,
-                    0.06,
-                    0.34,
-                    0.22
-                ]
-            }
-        }
-        # fmt: on
-
-        # 3. Form the parameters dictionary and weight objects (one per
-        # verification algorithm).
-        wgtrs = ga_driver.generate_weighters(ga_params, verifier_gt)
-        actor.wgtr = wgtrs[0]
-
-        ga_params['min_delta_score_converge'] = -ga_params[
-            'min_delta_converge_multiplier'
-        ] * (
-            actor.wgtr.human_wgt(is_marked_correct=True)
-            - actor.wgtr.human_wgt(is_marked_correct=False)
-        )
-
-        ga_params['min_delta_score_stability'] = (
-            ga_params['min_delta_score_converge'] / ga_params['min_delta_stability_ratio']
-        )
-
-        # 4. Get the request dictionary, which includes the database, the
-        # actual request edges and clusters, and the edge generator edges
-        # and ground truth (for simulation).
-        actor.db = _plugin_db_interface.db_interface_wbia(ibs, aids)
-        actor.edge_gen = _plugin_edge_generator.edge_generator_wbia(actor.db, actor.wgtr)
-
-        verifier = []
-        human = []
-
-        rids = ibs._get_all_review_rowids()
-        for rid in rids:
-            aid1, aid2 = ibs.get_review_aid_tuple(rid)
-            aid1_, aid2_ = str(aid1), str(aid2)
-            if aid1 not in aids_set:
-                continue
-            if aid2 not in aids_set:
-                continue
-            decision = ibs.get_review_decision_str(rid)
-            assert decision in const.EVIDENCE_DECISION.NICE_TO_CODE
-            if decision in ['Unreviewed']:
-                continue
-            if decision in ['Positive']:
-                value = True
-            elif decision in ['Negative']:
-                value = False
-            elif decision in ['Incomparable']:
-                value = None
-            else:
-                raise ValueError()
-            identity = ibs.get_review_identity(rid)
-            if identity.startswith('algo:'):
-                verifier.append([aid1_, aid2_, 0.0 if value else 1.0, 'vamp'])
-            elif identity.startswith('user:'):
-                human.append([aid1_, aid2_, value])
-            else:
-                raise ValueError()
-
-        cluster_ids = [str(nids[0])]
-
-        # fmt: off
-        request = {
-            'query': {
-                'verifier': verifier,
-                'human': human,
-                'cluster_ids': cluster_ids,
-            }
-        }
-        # fmt: on
-
-        verifier_req, human_req, cluster_req = extract_requests(request, actor.db)
-
-        # 5. Form the graph algorithm driver
-        driver = ga_driver.ga_driver(
-            verifier_req, human_req, cluster_req, actor.db, actor.edge_gen, ga_params
-        )
-
-        # 6. Run it. Changes are logged.
-        changes_to_review = driver.run_all_ccPICs()
-        print(ibs, changes_to_review)
-
-        # 7. Commit changes. Record them in the database and the log
-        # file.
-        # TBD
-
-        # actor.infr.print('Initializing infr tables')
-        # table = kwargs.get('init', 'staging')
-        # actor.infr.reset_feedback(table, apply=True)
-        # actor.infr.ensure_mst()
-        # actor.infr.apply_nondynamic_update()
-
-        # actor.infr.print('infr.status() = {}'.format(ut.repr4(actor.infr.status())))
-
-        # # Load random forests (TODO: should this be config specifiable?)
-        # actor.infr.print('loading published models')
-        # try:
-        #     actor.infr.load_published()
-        # except Exception:
-        #     pass
-
-        # # Start actor.infr Main Loop
-        # actor.infr.print('start id review')
-        # actor.infr.start_id_review()
-
-        return 'initialized'
-
-    def resume(actor):
-        raise NotImplementedError()
-
-    def add_feedback(actor, **feedback):
-        raise NotImplementedError()
-
-    def add_annots(actor, aids, **kwargs):
-        raise NotImplementedError()
-
-    def remove_annots(actor, aids, **kwargs):
-        raise NotImplementedError()
-
-    def get_logs(actor):
-        raise NotImplementedError()
-
-    def get_logs_latest(actor):
-        raise NotImplementedError()
-
-    def get_status(actor):
-        raise NotImplementedError()
-
-    # ##### HotSpotter ######
-
-    def get_feat_extractor(actor):
-        raise NotImplementedError()
+class LCAClient(GraphClient):
+    actor_cls = LCAActor
 
 
 if __name__ == '__main__':

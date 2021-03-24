@@ -30,7 +30,7 @@ def build_clustering(node2cluster):
 def build_clustering_from_clusters(cids, clusters):
     """
     From an iterator through the clusters, each of which can be a list
-    or a set of nodes, build a clusterin.  This maps from cluster ids
+    or a set of nodes, build a clustering.  This maps from cluster ids
     to sets of nodes. Each node must appear in at most one list and
     only once in that list. An assert failure occurs if either of
     these conditions is violated.
@@ -256,7 +256,7 @@ def print_structures(G, clustering, node2cid, score):
 
 def same_clustering(clustering0, clustering1, output_differences=False):
     """
-    Return True iff the two clusterings have the same sets of clusters (even if
+    Return True i.f.f. the two clusterings have the same sets of clusters (even if
     the cluster ids are different).  If the output_difference flag is set then
     print the clusters that appear only in one clustering.
     """

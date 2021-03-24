@@ -17,18 +17,18 @@ Given two clustering dictionaries and their node-to-cluster id
 mapping, the main function here produces a list of cluster_change
 objects.  Each contains:
 
-old_clustering - subdictionary (of the old clustering) involved in a
-change; the subdictionary is a mapping from cluster id (cid) to a set
+old_clustering - sub-dictionary (of the old clustering) involved in a
+change; the sub-dictionary is a mapping from cluster id (cid) to a set
 of graph nodes (annotations).
 
-old_n2c - old clustering's node to cluster mapping
+old_n2c - old node to cluster mapping
 
-new_clustering - subdictionary (of the new clustering) involved in a
+new_clustering - sub-dictionary (of the new clustering) involved in a
 change; this has the same structure as the old clustering; however,
-the cluster ids are completely meaningless and don't presetive the old
+the cluster ids are completely meaningless and don't preserve the old
 ones - this has to be managed when they are committed to the database
 
-new_n2c - new clustering's node to cluster mapping
+new_n2c - new node to cluster mapping
 
 query_nodes - new nodes added during to the old_clustering
 
@@ -38,7 +38,7 @@ rare)
 change_type - type of change
 
 There are several ways to think about a cluster change object. Perhaps
-the easiest is to say that each is a minimal subclustering of old and
+the easiest is to say that each is a minimal sub-clustering of old and
 new clustering covering the same set of graph nodes. One caveat to
 this definition is that it largely ignores query nodes that have been
 added at the start of this run of the id process and other nodes
@@ -64,7 +64,7 @@ in two or more previous clusters plus zero or more new nodes
 Split: A new cluster is formed from a proper subset of nodes from
 exactly one old cluster, plus, perhaps, new nodes:
 
-Merge/split: A new cluster is formed from a combation of nodes from at
+Merge/split: A new cluster is formed from a combination of nodes from at
 least two old clusters, where at least one of them contains a proper
 subset of nodes from a previous cluster. New nodes may be added.
 """

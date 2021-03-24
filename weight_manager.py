@@ -20,7 +20,7 @@ graph_algorithm.reset_waiting method.
 Information is kept in a dictionary that associates each node pair
 with a list of booleans.  A boolean at location i for a given node
 pair indicates whether or not the i-th augmentation method has
-returned a wgt for the node pair. This prevents return of redundant
+returned a weight for the node pair. This prevents return of redundant
 weights. A simple set called waiting_for keeps the triples of node,
 node and augmentation method that has been called for.
 """
@@ -108,7 +108,7 @@ class weight_manager(object):  # NOQA
         """
         Make a request for the next weight for each node pair.  For
         each pair, the first augmentation method used corresponds to
-        the first False entry in the list. If there are no False's then
+        the first False entry in the list. If there are no False values then
         the human review augmentation method is used. If the object is
         already waiting for the node_pair / augmentation combination
         then the node pair is skipped.

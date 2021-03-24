@@ -178,7 +178,7 @@ def lca_alg2(G, clustering, node2cid, trace_on=False):
     If there are multiple clusterings, then one option is a merge, but
     add others based on inconsistency
 
-    Don't allow len(G) <= 1it is two, and the
+    Don't allow len(G) <= 1 if it is two, and the
     nodes are disconnected, there is also no alternative.  If it is two,
     then split/merging vs. merging/splitting is the alternative.
     """

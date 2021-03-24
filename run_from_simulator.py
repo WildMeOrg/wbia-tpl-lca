@@ -27,7 +27,7 @@ def get_base_params():
     distribution. Since we require at least one node per cluster, the
     mean number of nodes in the clusters is 1 plus the mean of the
     distribution, and the mode number of nodes in the cluster is 1
-    plust the mode of the distribution. The gamma distribution is
+    plus the mode of the distribution. The gamma distribution is
     controlled by the shape and the scale values:
           mean is shape*scale,
           mode is (shape-1)*scale
@@ -72,8 +72,9 @@ def get_base_params():
     base_ga_params = {}
     base_ga_params['prob_human_correct'] = base_sim_params['p_human_correct']
     base_ga_params['min_delta_converge_multiplier'] = 2.0
-    base_ga_params['max_human_decisions'] = base_sim_params['max_human_mult'] * \
-        base_sim_params['num_clusters']
+    base_ga_params['max_human_decisions'] = (
+        base_sim_params['max_human_mult'] * base_sim_params['num_clusters']
+    )
     base_ga_params['min_delta_stability_ratio'] = 8
     base_ga_params['augmentation_names'] = ['vamp', 'human']
     base_ga_params['num_per_augmentation'] = 2
@@ -271,14 +272,13 @@ def one_simulation(out_path, file_prefix, sim_params, ga_params):
 
     logging.info('Negative / positive prob ratio %1.3f' % np_ratio)
 
-    scorer = es.exp_scores.create_from_error_frac(
-        sim_params['pos_error_frac'], np_ratio
-    )
+    scorer = es.exp_scores.create_from_error_frac(sim_params['pos_error_frac'], np_ratio)
     wgtr_i = wgtr.weighter(scorer, human_prob=sim_params['p_human_correct'])
 
     """  Set convergence parameters """
-    min_converge = -ga_params['min_delta_converge_multiplier'] * \
-        (wgtr_i.human_wgt(True) - wgtr_i.human_wgt(False))
+    min_converge = -ga_params['min_delta_converge_multiplier'] * (
+        wgtr_i.human_wgt(True) - wgtr_i.human_wgt(False)
+    )
     ga_params['min_delta_score_converge'] = min_converge
     ga_params['min_delta_score_stability'] = (
         min_converge / ga_params['min_delta_stability_ratio']
@@ -361,8 +361,10 @@ def one_simulation(out_path, file_prefix, sim_params, ga_params):
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print('Usage: %s out_path [name1 .. namek]\n'
-              'Where namei indicates the simulation experiment to run')
+        print(
+            'Usage: %s out_path [name1 .. namek]\n'
+            'Where namei indicates the simulation experiment to run'
+        )
         sys.exit()
     out_path = sys.argv[1]
 

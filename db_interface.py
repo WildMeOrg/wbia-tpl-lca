@@ -3,14 +3,14 @@
 The interface to the database asks for properties like nodes, edges,
 clusters and cluster ids. These are deliberately abstracted from the
 design of Wildbook. Their current Wildbook analogs are annotations,
-edges, marked individuals and their uuids. Since this could change in
+edges, marked individuals and their UUIDs. Since this could change in
 the future and we also hope that the algorithm could be used for other
 applications, we keep the terms of interface abstract.
 
 All edges are communicated as "quads" where each quad is of the form
   (n0, n1, w, aug_name)
 Here, n0 and n1 are the nodes, w is the (signed!) weight and aug_name
-is the augmentation method --- a verfication algorithm or a human
+is the augmentation method --- a verification algorithm or a human
 annotator -- that produced the edge.  Importantly, n0 < n1.
 
 As currently written, nodes are not added to the database through this
@@ -31,7 +31,7 @@ logger = logging.getLogger('wbia_lca')
 
 
 class db_interface(object):  # NOQA
-    def __init__(self, edges, clustering, db_add_on_init=True, ibs=None):
+    def __init__(self, edges, clustering, db_add_on_init=True):
         super(db_interface, self).__init__()
 
         self.edge_graph = nx.Graph()
@@ -39,7 +39,6 @@ class db_interface(object):  # NOQA
 
         self.clustering = clustering
         self.node_to_cid = ct.build_node_to_cluster_mapping(self.clustering)
-        self.ibs = ibs
 
     def add_edges(self, quads, db_add=True):
         """
@@ -47,7 +46,7 @@ class db_interface(object):  # NOQA
         single quad or a list of quads. For each, if the combination of
         n0, n1 and aug_name already exists and aug_name is not 'human'
         then the new edge replaces the existing edge. Otherwise, this
-        edge quad is added as though the graph is a multigraph.
+        edge quad is added as though the graph is a multi-graph.
         """
         self.edge_graph.add_edges_from([(n0, n1) for n0, n1, _, _ in quads])
         if db_add:
