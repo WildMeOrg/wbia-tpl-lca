@@ -526,7 +526,7 @@ class LCAActor(GraphActor):
             'tries_before_edge_done': 4,
 
             'ga_iterations_before_return': 10,
-            'ga_max_num_waiting': 500,
+            'ga_max_num_waiting': 100,
 
             'log_level': logging.INFO,
             'draw_iterations': False,
@@ -635,9 +635,7 @@ class LCAActor(GraphActor):
                         min_edges,
                     )
                     logger.info('WARMUP failed: key %r has %d edges, needs %d' % args)
-                    # return False
-                    verifier_gt[algo][key] = [1.0]
-                    continue
+                    return False
 
                 thresh_edges = -1 * min(num_edges, max_edges)
                 edges = edges[thresh_edges:]
@@ -646,14 +644,30 @@ class LCAActor(GraphActor):
         wgtrs = ga_driver.generate_weighters(actor.ga_params, verifier_gt)
         actor.wgtr = wgtrs[0]
 
-        human_gt_positive_weight = actor.wgtr.human_wgt(is_marked_correct=True)
-        human_gt_negative_weight = actor.wgtr.human_wgt(is_marked_correct=False)
-        human_gt_delta_weight = human_gt_positive_weight - human_gt_negative_weight
+        # Update delta score thresholds
         multiplier = actor.ga_params['min_delta_converge_multiplier']
         ratio = actor.ga_params['min_delta_stability_ratio']
+
+        human_gt_positive_weight = actor.wgtr.human_wgt(is_marked_correct=True)
+        human_gt_negative_weight = actor.wgtr.human_wgt(is_marked_correct=False)
+
+        human_gt_delta_weight = human_gt_positive_weight - human_gt_negative_weight
         convergence = -1.0 * multiplier * human_gt_delta_weight
+        stability = convergence / ratio
+
         actor.ga_params['min_delta_score_converge'] = convergence
-        actor.ga_params['min_delta_score_stability'] = convergence / ratio
+        actor.ga_params['min_delta_score_stability'] = stability
+
+        logging.info(
+            'Using provided   min_delta_converge_multiplier = %0.04f' % (multiplier,)
+        )
+        logging.info('Using provided   min_delta_stability_ratio     = %0.04f' % (ratio,))
+        logging.info(
+            'Using calculated min_delta_score_converge      = %0.04f' % (convergence,)
+        )
+        logging.info(
+            'Using calculated min_delta_score_stability     = %0.04f' % (stability,)
+        )
 
         return True
 
@@ -714,7 +728,8 @@ class LCAActor(GraphActor):
         # Run LNBNN to find matches
         desired_states = [POSTV, NEGTV, INCMP, UNREV]
         candidate_edges = actor.infr.find_lnbnn_candidate_edges(
-            desired_states=desired_states
+            desired_states=desired_states,
+            can_match_samename=True,
         )
 
         logger.info('LNBNN %d candidate edges' % (len(candidate_edges),))
@@ -780,7 +795,7 @@ class LCAActor(GraphActor):
         actor.phase = 0
         actor.loop_phase = 'warmup'
 
-        if actor.warmup:
+        while actor.warmup:
             logger.info('WARMUP: Computing warmup data')
 
             # We are still in warm-up, need to ask user for reviews
@@ -788,7 +803,6 @@ class LCAActor(GraphActor):
             candidate_edges, candidate_probs = warmup_data
             candidate_probs_ = list(map(int, np.around(np.array(candidate_probs) * 10.0)))
 
-            logger.info('WARMUP: Creating stratified buckets')
             # Create stratified buckets based on probabilities
             candidate_buckets = {}
             for candidate_edge, candidate_prob_ in zip(candidate_edges, candidate_probs_):
@@ -796,6 +810,7 @@ class LCAActor(GraphActor):
                     candidate_buckets[candidate_prob_] = []
                 candidate_buckets[candidate_prob_].append(candidate_edge)
             buckets = list(candidate_buckets.keys())
+            logger.info('WARMUP: Creating stratified buckets: %r' % (buckets,))
 
             num = actor.config.get('warmup.n_peek')
             user_request = []
@@ -807,13 +822,18 @@ class LCAActor(GraphActor):
                     bucket,
                     edge,
                 )
-                logger.info('WARMUP: bucket %r, edge %r' % args)
+                # logger.info('WARMUP: bucket %r, edge %r' % args)
                 # Yield a bunch of random edges (from stratified buckets) to the user
                 user_request += [actor._make_review_tuple(edge)]
             yield user_request
 
+            # Try to re-initialize LCA
+            actor._init_lca()
+
         actor.phase = 1
         actor.loop_phase = 'driver'
+
+        yield []
 
         if actor.driver is None:
             # Get driver data
