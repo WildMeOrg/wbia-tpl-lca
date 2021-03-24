@@ -386,7 +386,9 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
         return quads
 
     def commit_cluster_change_db(self, cc):
-        raise NotImplementedError()
+        logger.info(
+            '[commit_cluster_change_db] Requested to commit cluster change: %r' % (cc,)
+        )
 
 
 class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
@@ -474,7 +476,6 @@ class LCAActor(GraphActor):
     CommandLine:
         python -m wbia_lca._plugin LCAActor
         python -m wbia_lca._plugin LCAActor:0
-        python -m wbia_lca._plugin LCAActor:1
 
     Doctest:
         >>> # DISABLE_DOCTEST
@@ -507,6 +508,9 @@ class LCAActor(GraphActor):
 
         actor.resume_lock = threading.Lock()
 
+        actor.phase = 0
+        actor.loop_phase = 'init'
+
         # fmt: off
         actor.ga_params = {
             'aug_names': [
@@ -519,11 +523,10 @@ class LCAActor(GraphActor):
             'min_delta_stability_ratio': 8,
             'num_per_augmentation': 2,
 
-            # 'tries_before_edge_done': 4,
-            'tries_before_edge_done': 100,
+            'tries_before_edge_done': 4,
 
             'ga_iterations_before_return': 10,
-            'ga_max_num_waiting': 30,
+            'ga_max_num_waiting': 500,
 
             'log_level': logging.INFO,
             'draw_iterations': False,
@@ -531,11 +534,9 @@ class LCAActor(GraphActor):
         }
 
         actor.config = {
-            'manual.n_peek': 50,
-            'weighter_required_reviews': 10,
-            'weighter_recent_reviews': 50,
-            # 'weighter_required_reviews': 50,
-            # 'weighter_recent_reviews': 1000,
+            'warmup.n_peek': 50,
+            'weighter_required_reviews': 50,
+            'weighter_recent_reviews': 1000,
             'init_nids': [],
         }
         # fmt: on
@@ -763,12 +764,22 @@ class LCAActor(GraphActor):
         driver_data = verifier_results, human_decisions, cluster_ids_to_check
         return driver_data
 
-    def _make_review_tuple(actor, edge, priority=None):
+    def _make_review_tuple(actor, edge, priority=1.0):
         """ Makes tuple to be sent back to the user """
-        edge_data = {}
+        edge_data = actor.infr.get_nonvisual_edge_data(edge, on_missing='default')
+        # Extra information
+        edge_data['nid_edge'] = None
+        if actor.edge_gen is None:
+            edge_data['queue_len'] = 0
+        else:
+            edge_data['queue_len'] = len(actor.edge_gen.edge_requests)
+        edge_data['n_ccs'] = (-1, -1)
         return (edge, priority, edge_data)
 
     def main_gen(actor):
+        actor.phase = 0
+        actor.loop_phase = 'warmup'
+
         if actor.warmup:
             logger.info('WARMUP: Computing warmup data')
 
@@ -786,7 +797,7 @@ class LCAActor(GraphActor):
                 candidate_buckets[candidate_prob_].append(candidate_edge)
             buckets = list(candidate_buckets.keys())
 
-            num = actor.config.get('manual.n_peek')
+            num = actor.config.get('warmup.n_peek')
             user_request = []
             for index in range(num):
                 bucket = random.choice(buckets)
@@ -798,24 +809,31 @@ class LCAActor(GraphActor):
                 )
                 logger.info('WARMUP: bucket %r, edge %r' % args)
                 # Yield a bunch of random edges (from stratified buckets) to the user
-                user_request += [actor._make_review_tuple(edge, None)]
+                user_request += [actor._make_review_tuple(edge)]
             yield user_request
 
-        # Get driver data
-        assert not actor.warmup
-        driver_data = actor._refresh_data()
-        verifier_results, human_decisions, cluster_ids_to_check = driver_data
+        actor.phase = 1
+        actor.loop_phase = 'driver'
 
-        # Initialize the Driver
-        actor.driver = ga_driver.ga_driver(
-            verifier_results,
-            human_decisions,
-            cluster_ids_to_check,
-            actor.db,
-            actor.edge_gen,
-            actor.ga_params,
-            db_add_on_init=True,
-        )
+        if actor.driver is None:
+            # Get driver data
+            assert not actor.warmup
+            driver_data = actor._refresh_data()
+            verifier_results, human_decisions, cluster_ids_to_check = driver_data
+
+            # Initialize the Driver
+            actor.driver = ga_driver.ga_driver(
+                verifier_results,
+                human_decisions,
+                cluster_ids_to_check,
+                actor.db,
+                actor.edge_gen,
+                actor.ga_params,
+                db_add_on_init=True,
+            )
+
+        actor.phase = 2
+        actor.loop_phase = 'run_all_ccPICs'
 
         changes_to_review = None
         while True:
@@ -845,14 +863,20 @@ class LCAActor(GraphActor):
 
             user_request = []
             for edge in requested_human_edges:
-                user_request += [actor._make_review_tuple(edge, None)]
+                user_request += [actor._make_review_tuple(edge)]
 
             yield user_request
 
-        for cc in changes_to_review:
-            actor.db.commit_cluster_change(cc)
+        actor.phase = 3
+        actor.loop_phase = 'commit_cluster_change'
 
-        return None
+        for changes in changes_to_review:
+            for cc in changes:
+                actor.db.commit_cluster_change(cc)
+
+        actor.phase = 4
+
+        return 'finished:main'
 
     def resume(actor):
         with actor.resume_lock:
@@ -878,19 +902,59 @@ class LCAActor(GraphActor):
         raise NotImplementedError()
 
     def logs(actor):
-        return 'no logs for LCA'
+        return None
 
     def status(actor):
-        infr_status = {}
+        actor_status = {}
         try:
-            infr_status['phase'] = actor.lca.phase
+            actor_status['phase'] = actor.phase
+        except Exception:
+            pass
+        try:
+            actor_status['loop_phase'] = actor.loop_phase
+        except Exception:
+            pass
+        try:
+            actor_status['is_inconsistent'] = False
+        except Exception:
+            pass
+        try:
+            actor_status['is_converged'] = actor.phase == 4
+        except Exception:
+            pass
+        try:
+            actor_status['num_meaningful'] = 0
+        except Exception:
+            pass
+        try:
+            actor_status['num_pccs'] = (
+                None if actor.edge_gen is None else len(actor.edge_gen.edge_requests)
+            )
+        except Exception:
+            pass
+        try:
+            actor_status['num_inconsistent_ccs'] = 0
+        except Exception:
+            pass
+        try:
+            actor_status['cc_status'] = {
+                'num_names_max': len(actor.db.clustering),
+                'num_inconsistent': 0,
+            }
         except Exception:
             pass
 
-        return infr_status
+        return actor_status
 
     def metadata(actor):
-        return {}
+        if actor.infr.verifiers is None:
+            actor.infr.verifiers = {}
+        verifier = actor.infr.verifiers.get('match_state', None)
+        extr = None if verifier is None else verifier.extr
+        metadata = {
+            'extr': extr,
+        }
+        return metadata
 
 
 class LCAClient(GraphClient):

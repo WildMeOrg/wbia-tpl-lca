@@ -384,13 +384,17 @@ class ga_driver(object):  # NOQA
         return changes
 
     def run_all_ccPICs(self, return_on_paused=False):
+
+        changes_to_review = []
         for edges, clustering in self.ccPICs:
             changes = self.run_ga_on_ccPIC(
                 edges, clustering, return_on_paused=return_on_paused
             )
             if changes is None:
                 return None
-            self.changes_to_review.append(changes)
+            changes_to_review.append(changes)
+
+        self.changes_to_review = changes_to_review
         return self.changes_to_review
 
 
