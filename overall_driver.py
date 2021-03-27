@@ -201,7 +201,8 @@ if __name__ == '__main__':
     )
 
     # 6. Run it. Changes are logged.
-    changes_to_review = driver.run_all_ccPICs()
+    ccPIC_gen = driver.run_all_ccPICs()
+    changes_to_review = list(ccPIC_gen)
     logger.info(changes_to_review)
 
     # 7. Commit changes. Record them in the database and the log

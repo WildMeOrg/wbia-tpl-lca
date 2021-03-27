@@ -397,7 +397,6 @@ class ga_driver(object):  # NOQA
         yield changes
 
     def run_all_ccPICs(self, yield_on_paused=False):
-
         changes_to_review = []
         for edges, clustering in self.ccPICs:
             ga_gen = self.run_ga_on_ccPIC(
@@ -416,7 +415,7 @@ class ga_driver(object):  # NOQA
             changes_to_review.append(changes)
 
         self.changes_to_review = changes_to_review
-        yield self.changes_to_review
+        yield from self.changes_to_review
 
 
 def test_ga_driver():

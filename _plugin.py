@@ -251,7 +251,9 @@ def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
     )
 
     # 6. Run it. Changes are logged.
-    changes_to_review = driver.run_all_ccPICs()
+    ccPIC_gen = driver.run_all_ccPICs()
+    changes_to_review = list(ccPIC_gen)
+    print(changes_to_review)
 
     # 7. Commit changes. Record them in the database and the log
     # file.
@@ -723,7 +725,10 @@ class LCAActor(GraphActor):
             }
         }
         for aid1, aid2, decision, weight, aug_name in quads_ext:
-            edge = (aid1, aid2)
+            edge = (
+                int(aid1),
+                int(aid2),
+            )
             if not is_aug_name_human(aug_name):
                 continue
             if decision == POSTV:
@@ -1028,31 +1033,31 @@ class LCAActor(GraphActor):
 
         actor.ga_gen = actor.driver.run_all_ccPICs(yield_on_paused=True)
 
-        changes_to_review = None
+        changes_to_review = []
         while True:
             try:
-                changes_to_review = next(actor.ga_gen)
+                change_to_review = next(actor.ga_gen)
             except StopIteration:
                 break
 
-            if changes_to_review is not None:
-                break
+            if change_to_review is None:
+                requested_human_edges = []
+                for edge in actor.edge_gen.get_edge_requests():
+                    aid1_, aid2_, aug_name = edge
+                    if is_aug_name_human(aug_name):
+                        aid1, aid2 = int(aid1_), int(aid2_)
+                        requested_human_edges.append((aid1, aid2))
 
-            requested_human_edges = []
-            for edge in actor.edge_gen.get_edge_requests():
-                aid1_, aid2_, aug_name = edge
-                if is_aug_name_human(aug_name):
-                    aid1, aid2 = int(aid1_), int(aid2_)
-                    requested_human_edges.append((aid1, aid2))
+                args = (len(requested_human_edges),)
+                logger.info('Received %d human edge requests' % args)
 
-            args = (len(requested_human_edges),)
-            logger.info('Received %d human edge requests' % args)
+                user_request = []
+                for edge in requested_human_edges:
+                    user_request += [actor._make_review_tuple(edge)]
 
-            user_request = []
-            for edge in requested_human_edges:
-                user_request += [actor._make_review_tuple(edge)]
-
-            yield user_request
+                yield user_request
+            else:
+                changes_to_review.append(change_to_review)
 
         actor.phase = 3
         actor.loop_phase = 'commit_cluster_change'
