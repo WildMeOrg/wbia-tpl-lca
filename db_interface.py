@@ -31,16 +31,16 @@ logger = logging.getLogger('wbia_lca')
 
 
 class db_interface(object):  # NOQA
-    def __init__(self, edges, clustering, db_add_on_init=True):
+    def __init__(self, edges, clustering):
         super(db_interface, self).__init__()
 
         self.edge_graph = nx.Graph()
-        self.add_edges(edges, db_add=db_add_on_init)
+        self.add_edges(edges)
 
         self.clustering = clustering
         self.node_to_cid = ct.build_node_to_cluster_mapping(self.clustering)
 
-    def add_edges(self, quads, db_add=True):
+    def add_edges(self, quads):
         """
         Add edges of the form (n0, n1, w, aug_name). This can be a
         single quad or a list of quads. For each, if the combination of
@@ -49,19 +49,21 @@ class db_interface(object):  # NOQA
         edge quad is added as though the graph is a multi-graph.
         """
         self.edge_graph.add_edges_from([(n0, n1) for n0, n1, _, _ in quads])
-        if db_add:
-            return self.add_edges_db(quads)
+        return self.add_edges_db(quads)
 
-    def get_weight(self, triple):
-        """
-        Return the weight if the combination of n0, n1 and aug_name.
-        If the aug_name is 'human' the summed weight is
-        returned. Returns None if triple is unknown.
-        """
-        return self.get_weight_db(triple)
+    # def get_weight(self, triple):
+    #     """
+    #     Return the weight if the combination of n0, n1 and aug_name.
+    #     If the aug_name is 'human' the summed weight is
+    #     returned. Returns None if triple is unknown.
+    #     """
+    #     return self.get_weight_db(triple)
 
     def edges_from_attributes(self, n0, n1):
-        return self.edges_from_attributes_db(n0, n1)
+        try:
+            return self.edges_from_attributes_db(n0, n1)
+        except KeyError:
+            return None
 
     def cluster_exists(self, cid):
         """
@@ -201,8 +203,8 @@ class db_interface(object):  # NOQA
     def add_edges_db(self, quads):
         raise NotImplementedError()
 
-    def get_weight_db(self, triple):
-        raise NotImplementedError()
+    # def get_weight_db(self, triple):
+    #     raise NotImplementedError()
 
     def edges_from_attributes_db(self, n0, n1):
         raise NotImplementedError()

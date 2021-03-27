@@ -30,14 +30,15 @@ class edge_generator(object):  # NOQA
             (n0, n1, self.wgt_from_verifier(p, vn), vn)
             for n0, n1, p, vn in verifier_quads
         ]
-        self.db.add_edges(edge_quads, db_add=db_add)
+        if db_add:
+            self.db.add_edges(edge_quads)
         return edge_quads
 
-    def new_edges_from_human(self, human_triples, db_add=True):
+    def new_edges_from_human(self, human_triples):
         edge_quads = [
             (n0, n1, self.wgtr.human_wgt(b), 'human') for n0, n1, b in human_triples
         ]
-        self.db.add_edges(edge_quads, db_add=db_add)
+        self.db.add_edges(edge_quads)
         return edge_quads
 
     def edge_request_cb(self, req_list):

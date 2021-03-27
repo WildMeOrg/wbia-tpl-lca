@@ -34,6 +34,14 @@ register_preproc_image = controller_inject.register_preprocs['image']
 register_preproc_annot = controller_inject.register_preprocs['annot']
 
 
+HUMAN_AUG_NAME = 'human'
+HUMAN_IDENTITY = 'user:web'
+HUMAN_IDENTITY_PREFIX = '%s:' % (HUMAN_IDENTITY.split(':')[0],)
+ALGO_AUG_NAME = 'vamp'
+ALGO_IDENTITY = 'algo:vamp'
+ALGO_IDENTITY_PREFIX = '%s:' % (ALGO_IDENTITY.split(':')[0],)
+
+
 @register_ibs_method
 @register_api('/api/plugin/lca/sim/', methods=['GET'])
 def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
@@ -252,139 +260,184 @@ def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
     return changes_to_review
 
 
+def is_aug_name_human(aug_name):
+    return aug_name == HUMAN_AUG_NAME
+
+
+def is_aug_name_algo(aug_name):
+    return aug_name == ALGO_AUG_NAME
+
+
+def is_identity_human(identity):
+    return identity.startswith(HUMAN_IDENTITY_PREFIX)
+
+
+def is_identity_algo(identity):
+    return identity.startswith(ALGO_IDENTITY_PREFIX)
+
+
+def convert_aug_name_to_identity(aug_name_list):
+    identity_list = []
+    for aug_name in aug_name_list:
+        if is_aug_name_human(aug_name):
+            identity = HUMAN_IDENTITY
+        elif is_aug_name_algo(aug_name):
+            identity = ALGO_IDENTITY
+        else:
+            raise ValueError()
+        identity_list.append(identity)
+    return identity_list
+
+
+def convert_identity_to_aug_name(identity_list):
+    aug_name_list = []
+    for identity in identity_list:
+        if is_identity_human(identity):
+            aug_name = HUMAN_AUG_NAME
+        elif is_identity_algo(identity):
+            aug_name = ALGO_AUG_NAME
+        else:
+            raise ValueError()
+        aug_name_list.append(aug_name)
+    return aug_name_list
+
+
 class db_interface_wbia(db_interface.db_interface):  # NOQA
-    def __init__(self, ibs, aids):
-        self.ibs = ibs
-        self.aids = aids
+    def __init__(self, actor):
+        self.controller = actor
+        self.ibs = actor.infr.ibs
 
-        _edges = self._get_existing_weights()
-        _clustering = self._get_existing_clustering()
-        super(db_interface_wbia, self).__init__(_edges, _clustering, db_add_on_init=False)
-
-    def _get_existing_weights(self):
-        aids_set = set(self.aids)
-
-        weight_rowid_list = self.ibs._get_all_edge_weight_rowids()
-        weight_value_list = self.ibs.get_edge_weight_value(weight_rowid_list)
-        weight_identity_list = self.ibs.get_edge_weight_identity(weight_rowid_list)
+        self.max_auto_reviews = 1
+        self.max_human_reviews = 10
+        self.max_reviews = self.max_auto_reviews + self.max_human_reviews
 
         edges = []
-        for weight_rowid, weight_value, weight_identity in zip(
-            weight_rowid_list, weight_value_list, weight_identity_list
-        ):
-            aid1, aid2 = self.ibs.get_edge_weight_aid_tuple(weight_rowid)
-            if aid1 not in aids_set or aid2 not in aids_set:
-                continue
-            aid1_, aid2_ = str(aid1), str(aid2)
-
-            if weight_identity.startswith('algo:'):
-                aug_name = 'vamp'
-            elif weight_identity.startswith('user:'):
-                aug_name = 'human'
-            else:
-                raise ValueError()
-
-            edge = (aid1_, aid2_, weight_value, aug_name)
-            edges.append(edge)
-
-        args = (
-            len(weight_rowid_list),
-            len(set(edges)),
-        )
-        logger.info('Found %d existing edge weights for %d unique edges' % args)
-
-        return edges
-
-    def _get_existing_clustering(self):
-        aids = self.aids
-        nids = self.ibs.get_annot_nids(aids)
-
         clustering = {}
-        for aid, nid in zip(aids, nids):
-            aid_, nid_ = str(aid), str(nid)
-            if nid_ not in clustering:
-                clustering[nid_] = []
-            clustering[nid_].append(aid_)
+        super(db_interface_wbia, self).__init__(edges, clustering)
 
-        for nid in clustering:
-            clustering[nid] = sorted(clustering[nid])
+    # def _get_existing_weights(self, clustering):
+    #     aids_set = set(self.aids)
 
-        nids_ = set(map(str, nids))
-        assert len(clustering.keys() ^ nids_) == 0
+    #     self.ibs._get_all_review()
 
-        args = (len(nids),)
-        logger.info('Retrieving clustering with %d names' % args)
+    #     weight_rowid_list = self.ibs._get_all_edge_weight_rowids()
+    #     weight_value_list = self.ibs.get_edge_weight_value(weight_rowid_list)
+    #     weight_identity_list = self.ibs.get_edge_weight_identity(weight_rowid_list)
 
-        return clustering
+    #     edges = []
+    #     for weight_rowid, weight_value, weight_identity in zip(
+    #         weight_rowid_list, weight_value_list, weight_identity_list
+    #     ):
+    #         aid1, aid2 = self.ibs.get_edge_weight_aid_tuple(weight_rowid)
+    #         if aid1 not in aids_set or aid2 not in aids_set:
+    #             continue
+    #         aid1_, aid2_ = str(aid1), str(aid2)
+
+    #         if weight_identity.startswith('algo:'):
+    #             aug_name = 'vamp'
+    #         elif weight_identity.startswith('user:'):
+    #             aug_name = 'human'
+    #         else:
+    #             raise ValueError()
+
+    #         edge = (aid1_, aid2_, weight_value, aug_name)
+    #         edges.append(edge)
+
+    #     args = (
+    #         len(weight_rowid_list),
+    #         len(set(edges)),
+    #     )
+    #     logger.info('Found %d existing edge weights for %d unique edges' % args)
+
+    #     return edges
+
+    # def _get_existing_clustering(self):
+    #     clustering_labels = list(self.infr.pos_graph.component_labels())
+    #     clustering_components = list(self.infr.pos_graph.connected_components())
+    #     assert len(clustering_labels) == len(clustering_components)
+
+    #     clustering = {}
+    #     for clustering_label, clustering_component in zip(clustering_labels, clustering_components):
+    #         clustering_label = str(clustering_label)
+    #         clustering_component = list(map(str, clustering_component))
+    #         clustering[clustering_label] = clustering_component
+
+    #     for nid in clustering:
+    #         clustering[nid] = sorted(clustering[nid])
+
+    #     args = (len(clustering),)
+    #     logger.info('Retrieving clustering with %d names' % args)
+
+    #     return clustering
+
+    def _cleanup_edges(self, max_auto=None, max_human=None):
+        if max_auto is None:
+            max_auto = self.max_auto_reviews
+        if max_human is None:
+            max_human = self.max_human_reviews
+        self.ibs.check_edge_weights(
+            max_auto=max_auto,
+            max_human=max_human,
+        )
 
     def add_edges_db(self, quads):
         aid_1_list = list(map(int, ut.take_column(quads, 0)))
         aid_2_list = list(map(int, ut.take_column(quads, 1)))
         value_list = ut.take_column(quads, 2)
         aug_name_list = ut.take_column(quads, 3)
-
-        identity_list = []
-        for aug_name in aug_name_list:
-            if aug_name == 'human':
-                identity = 'user:web'
-            elif aug_name == 'vamp':
-                identity = 'algo:vamp'
-            else:
-                raise ValueError()
-            identity_list.append(identity)
+        identity_list = convert_aug_name_to_identity(aug_name_list)
 
         weight_rowid_list = self.ibs.add_edge_weight(
             aid_1_list, aid_2_list, value_list, identity_list
         )
+        self._cleanup_edges()
         return weight_rowid_list
 
-    def get_weight_db(self, triple):
-        raise RuntimeError('This should never need to be executed')
+    # def get_weight_db(self, triple):
+    #     raise RuntimeError('This should never need to be executed')
 
-        n0, n1, aug_name = triple
+    #     n0, n1, aug_name = triple
 
-        n0_, n1_ = int(n0), int(n1)
-        edges = [(n0_, n1_)]
-        weight_rowid_list = self.ibs.get_edge_weight_rowids_from_edges(edges)[0]
-        weight_rowid_list = sorted(weight_rowid_list)
+    #     n0_, n1_ = int(n0), int(n1)
+    #     edges = [(n0_, n1_)]
+    #     weight_rowid_list = self.ibs.get_edge_weight_rowids_from_edges(edges)[0]
+    #     weight_rowid_list = sorted(weight_rowid_list)
 
-        value_list = self.ibs.get_edge_weight_value(weight_rowid_list)
-        identity_list = self.ibs.get_edge_weight_identity(weight_rowid_list)
+    #     value_list = self.ibs.get_edge_weight_value(weight_rowid_list)
+    #     identity_list = self.ibs.get_edge_weight_identity(weight_rowid_list)
 
-        weight = []
-        for value, identity in zip(value_list, identity_list):
-            if aug_name == 'human':
-                if identity.startswith('human:'):
-                    weight.append(value)
-            else:
-                weight = [value]
+    #     weight = []
+    #     for value, identity in zip(value_list, identity_list):
+    #         if aug_name == 'human':
+    #             if identity.startswith('human:'):
+    #                 weight.append(value)
+    #         else:
+    #             weight = [value]
 
-        weight = None if len(weight) == 0 else sum(weight)
+    #     weight = None if len(weight) == 0 else sum(weight)
 
-        return weight
+    #     return weight
 
     def edges_from_attributes_db(self, n0, n1):
         n0_, n1_ = int(n0), int(n1)
         edges = [(n0_, n1_)]
-        weight_rowid_list = self.ibs.get_edge_weight_rowids_from_edges(edges)[0]
+        weight_rowid_list = self.ibs.get_edge_weight_rowids_from_edges(edges)
+        weight_rowid_list = weight_rowid_list[0]
         weight_rowid_list = sorted(weight_rowid_list)
 
         aid_1_list = [n0] * len(weight_rowid_list)
         aid_2_list = [n1] * len(weight_rowid_list)
         value_list = self.ibs.get_edge_weight_value(weight_rowid_list)
         identity_list = self.ibs.get_edge_weight_identity(weight_rowid_list)
-
-        aug_name_list = []
-        for identity in identity_list:
-            if identity.startswith('algo:'):
-                aug_name = 'vamp'
-            elif identity.startswith('user:'):
-                aug_name = 'human'
-            else:
-                raise ValueError()
-            aug_name_list.append(aug_name)
+        aug_name_list = convert_identity_to_aug_name(identity_list)
 
         quads = list(zip(aid_1_list, aid_2_list, value_list, aug_name_list))
+
+        num_vamp = aug_name_list.count(ALGO_AUG_NAME)
+        num_human = aug_name_list.count(HUMAN_AUG_NAME)
+        assert num_vamp <= self.max_auto_reviews
+        assert num_human <= self.max_human_reviews
+        assert len(quads) <= self.max_reviews
 
         return quads
 
@@ -395,35 +448,48 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
 
 
 class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
+    def _cleanup_edges(self):
+        clean_edge_requests = []
+        for edge in self.edge_requests:
+            aid1_, aid2_, aug_name = edge
+            aid1, aid2 = int(aid1_), int(aid2_)
+            if aid1 > aid2:
+                aid1, aid2 = aid2, aid1
+            aid1_, aid2_ = str(aid1), str(aid2)
+            clean_edge = (aid1_, aid2_, aug_name)
+            clean_edge_requests.append(clean_edge)
+        self.edge_requests = clean_edge_requests
+
+    def get_edge_requests(self):
+        self._cleanup_edges()
+        return self.edge_requests
+
+    def set_edge_requests(self, new_edge_requests):
+        self.edge_requests = new_edge_requests
+        self._cleanup_edges()
+        return self.edge_requests
+
     def edge_request_cb_async(self):
         actor = self.controller
 
         requested_vamp_edges = []
         keep_edge_requests = []
-        for edge in self.edge_requests:
+        for edge in self.get_edge_requests():
             aid1_, aid2_, aug_name = edge
-            if aug_name == 'vamp':
+            if is_aug_name_algo(aug_name):
                 aid1, aid2 = int(aid1_), int(aid2_)
                 requested_vamp_edges.append((aid1, aid2))
             else:
                 keep_edge_requests.append(edge)
 
-        requested_vamp_probs = actor._candidate_edge_probs(requested_vamp_edges)
-
-        verifier_quads = []
-        for edge, prob in zip(requested_vamp_edges, requested_vamp_probs):
-            aid1, aid2 = edge
-            aid1_, aid2_ = str(aid1), str(aid2)
-            verifier_quad = (aid1_, aid2_, prob, 'vamp')
-            verifier_quads.append(verifier_quad)
-
-        new_edge_results = self.new_edges_from_verifier(verifier_quads)
-        self.edge_results += new_edge_results
-        self.edge_requests = keep_edge_requests
+        request_data = actor._candidate_edge_probs(requested_vamp_edges)
+        _, requested_vamp_prob_quads, requested_vamp_quads = request_data
+        self.edge_results += requested_vamp_quads
+        self.set_edge_requests(keep_edge_requests)
 
         args = (
             len(requested_vamp_edges),
-            len(new_edge_results),
+            len(requested_vamp_quads),
             len(self.edge_results),
             len(keep_edge_requests),
         )
@@ -448,6 +514,7 @@ class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
         priority=None,
     ):
         aid1, aid2 = edge
+
         if evidence_decision is None:
             evidence_decision = UNREV
         if meta_decision is None:
@@ -472,6 +539,25 @@ class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
         new_edge_results = self.new_edges_from_human(human_triples)
         self.edge_results += new_edge_results
 
+        # Remove edge request for this pair now that a result has been returned
+        found_edge_requests = []
+        keep_edge_requests = []
+        for edge in self.get_edge_requests():
+            temp_aid1_, temp_aid2_, aug_name = edge
+            if is_aug_name_human(aug_name):
+                if temp_aid1_ == aid1_ and temp_aid2_ == aid2_:
+                    found_edge_requests.append(edge)
+                    continue
+            keep_edge_requests.append(edge)
+        args = (
+            len(found_edge_requests),
+            len(keep_edge_requests),
+        )
+        logger.info(
+            'Found %d human edge requests to remove, kept %d requests in queue' % args
+        )
+        self.set_edge_requests(keep_edge_requests)
+
 
 class LCAActor(GraphActor):
     """
@@ -481,7 +567,6 @@ class LCAActor(GraphActor):
         python -m wbia_lca._plugin LCAActor:0
 
     Doctest:
-        >>> # DISABLE_DOCTEST
         >>> from wbia.web.graph_server import _testdata_feedback_payload
         >>> import wbia
         >>> actor = LCAActor()
@@ -507,6 +592,7 @@ class LCAActor(GraphActor):
         actor.db = None
         actor.edge_gen = None
         actor.driver = None
+        actor.ga_gen = None
         actor.changes = None
 
         actor.resume_lock = threading.Lock()
@@ -517,8 +603,8 @@ class LCAActor(GraphActor):
         # fmt: off
         actor.ga_params = {
             'aug_names': [
-                'vamp',
-                'human',
+                ALGO_AUG_NAME,
+                HUMAN_AUG_NAME,
             ],
             'prob_human_correct': 0.97,
 
@@ -529,7 +615,7 @@ class LCAActor(GraphActor):
             'tries_before_edge_done': 4,
 
             'ga_iterations_before_return': 10,
-            'ga_max_num_waiting': 100,
+            'ga_max_num_waiting': 1000,
 
             'log_level': logging.INFO,
             'draw_iterations': False,
@@ -539,7 +625,7 @@ class LCAActor(GraphActor):
         actor.config = {
             'warmup.n_peek': 50,
             'weighter_required_reviews': 50,
-            'weighter_recent_reviews': 1000,
+            'weighter_recent_reviews': 500,
             'init_nids': [],
         }
         # fmt: on
@@ -552,9 +638,6 @@ class LCAActor(GraphActor):
         assert dbdir is not None, 'must specify dbdir'
         assert actor.infr is None, 'AnnotInference already running'
         ibs = wbia.opendb(dbdir=dbdir, use_cache=False, web=False, force_serial=True)
-
-        weight_rowid_list = ibs._get_all_edge_weight_rowids()
-        ibs.delete_edge_weight(weight_rowid_list)
 
         # Create the reference AnnotInference
         logger.info('starting via actor with ibs = %r' % (ibs,))
@@ -581,45 +664,80 @@ class LCAActor(GraphActor):
 
         assert actor.infr is not None
 
+    def _get_edge_quads_ext_using_reviews(
+        actor, delay_compute=False, desired_aug_name=None
+    ):
+        assert actor.infr is not None
+
+        review_rowid_list = actor.infr.ibs._get_all_review_rowids()
+        review_edge_list = actor.infr.ibs.get_review_aid_tuple(review_rowid_list)
+        review_decision_list = actor.infr.ibs.get_review_decision(review_rowid_list)
+        review_identity_list = actor.infr.ibs.get_review_identity(review_rowid_list)
+        review_aug_name_list = convert_identity_to_aug_name(review_identity_list)
+
+        if delay_compute:
+            review_prob_list = [None] * len(review_rowid_list)
+        else:
+            review_prob_list, _, _ = actor._candidate_edge_probs(review_edge_list)
+
+        quads_ext = []
+        zipped = zip(
+            review_edge_list, review_decision_list, review_prob_list, review_aug_name_list
+        )
+        for review_edge, review_decision, review_prob, review_aug_name in zipped:
+            if desired_aug_name is not None:
+                if review_aug_name != desired_aug_name:
+                    continue
+            aid1, aid2 = review_edge
+            aid1_, aid2_ = str(aid1), str(aid2)
+            review_decision_code = const.EVIDENCE_DECISION.INT_TO_CODE[review_decision]
+            quad_ext = (aid1_, aid2_, review_decision_code, review_prob, review_aug_name)
+            quads_ext.append(quad_ext)
+
+        return quads_ext
+
+    def _init_edge_weights_using_reviews(actor, desired_aug_name=None):
+        assert actor.edge_gen is not None
+        quads_ext = actor._get_edge_quads_ext_using_reviews(
+            desired_aug_name=desired_aug_name
+        )
+        quads_ = [
+            (aid1, aid2, weight, aug_name)
+            for aid1, aid2, decision, weight, aug_name in quads_ext
+        ]
+        quads = actor.edge_gen.new_edges_from_verifier(quads_, db_add=False)
+        return quads, quads_ext
+
     def _init_weighter(actor):
         logger.info('Attempting to warmup (_init_weighter)')
 
         assert actor.infr is not None
 
-        review_rowids = actor.infr.ibs._get_all_review_rowids()
-        review_rowids = sorted(review_rowids)
-        review_edges = actor.infr.ibs.get_review_aid_tuple(review_rowids)
-        review_decisions = actor.infr.ibs.get_review_decision(review_rowids)
-        review_identities = actor.infr.ibs.get_review_identity(review_rowids)
-        logger.info('Fetched %d reviews' % (len(review_rowids),))
+        quads_ext = actor._get_edge_quads_ext_using_reviews(delay_compute=True)
+        logger.info('Fetched %d reviews' % (len(quads_ext),))
 
-        verifier_edges = {
-            'vamp': {
+        verifier_gt = {
+            ALGO_AUG_NAME: {
                 'gt_positive_probs': [],
                 'gt_negative_probs': [],
             }
         }
-        for review_edge, review_decision, review_identity in zip(
-            review_edges, review_decisions, review_identities
-        ):
-            if review_decision == const.EVIDENCE_DECISION.POSITIVE:
+        for aid1, aid2, decision, weight, aug_name in quads_ext:
+            edge = (aid1, aid2)
+            if not is_aug_name_human(aug_name):
+                continue
+            if decision == POSTV:
                 key = 'gt_positive_probs'
-            elif review_decision == const.EVIDENCE_DECISION.NEGATIVE:
+            elif decision == NEGTV:
                 key = 'gt_negative_probs'
             else:
                 key = None
-
-            if not review_identity.startswith('user:'):
-                key = None
-
             if key is not None:
-                verifier_edges['vamp'][key].append(review_edge)
+                verifier_gt[ALGO_AUG_NAME][key].append(edge)
 
-        verifier_gt = {}
-        for algo in verifier_edges:
-            verifier_gt[algo] = {}
-            for key in verifier_edges[algo]:
-                edges = verifier_edges[algo][key]
+        for algo in verifier_gt:
+            for key in verifier_gt[algo]:
+                edges = verifier_gt[algo][key]
                 num_edges = len(edges)
                 min_edges = actor.config.get('weighter_required_reviews')
                 max_edges = actor.config.get('weighter_recent_reviews')
@@ -638,11 +756,12 @@ class LCAActor(GraphActor):
                         min_edges,
                     )
                     logger.info('WARMUP failed: key %r has %d edges, needs %d' % args)
-                    return False
+                    # return False
 
                 thresh_edges = -1 * min(num_edges, max_edges)
                 edges = edges[thresh_edges:]
-                verifier_gt[algo][key] = actor._candidate_edge_probs(edges)
+                probs, _, _ = actor._candidate_edge_probs(edges)
+                verifier_gt[algo][key] = probs
 
         wgtrs = ga_driver.generate_weighters(actor.ga_params, verifier_gt)
         actor.wgtr = wgtrs[0]
@@ -661,14 +780,14 @@ class LCAActor(GraphActor):
         actor.ga_params['min_delta_score_converge'] = convergence
         actor.ga_params['min_delta_score_stability'] = stability
 
-        logging.info(
+        logger.info(
             'Using provided   min_delta_converge_multiplier = %0.04f' % (multiplier,)
         )
-        logging.info('Using provided   min_delta_stability_ratio     = %0.04f' % (ratio,))
-        logging.info(
+        logger.info('Using provided   min_delta_stability_ratio     = %0.04f' % (ratio,))
+        logger.info(
             'Using calculated min_delta_score_converge      = %0.04f' % (convergence,)
         )
-        logging.info(
+        logger.info(
             'Using calculated min_delta_score_stability     = %0.04f' % (stability,)
         )
 
@@ -681,7 +800,7 @@ class LCAActor(GraphActor):
             return
 
         # Initialize the DB
-        actor.db = db_interface_wbia(actor.infr.ibs, actor.infr.aids)
+        actor.db = db_interface_wbia(actor)
 
         # Initialize the Edge Generator
         actor.edge_gen = edge_generator_wbia(actor.db, actor.wgtr, controller=actor)
@@ -706,7 +825,7 @@ class LCAActor(GraphActor):
 
     def _candidate_edge_probs(actor, candidate_edges):
         if len(candidate_edges) == 0:
-            return []
+            return [], [], []
 
         task_probs = actor.infr._make_task_probs(candidate_edges)
         match_probs = list(task_probs['match_state']['match'])
@@ -714,78 +833,119 @@ class LCAActor(GraphActor):
 
         candidate_probs = []
         for match_prob, nomatch_prob in zip(match_probs, nomatch_probs):
-            prob = 0.5 + (match_prob - nomatch_prob) / 2
-            candidate_probs.append(prob)
+            prob_ = 0.5 + (match_prob - nomatch_prob) / 2
+            candidate_probs.append(prob_)
 
         num_probs = len(candidate_probs)
         min_probs = None if num_probs == 0 else '%0.04f' % (min(candidate_probs),)
         max_probs = None if num_probs == 0 else '%0.04f' % (max(candidate_probs),)
+        mean_probs = None if num_probs == 0 else '%0.04f' % (np.mean(candidate_probs),)
+        std_probs = None if num_probs == 0 else '%0.04f' % (np.std(candidate_probs),)
 
-        args = (num_probs, min_probs, max_probs)
-        logger.info('VAMP probabilities on %d edges (range: %s - %s)' % args)
+        args = (num_probs, min_probs, max_probs, mean_probs, std_probs)
+        logger.info(
+            'VAMP probabilities on %d edges (range: %s - %s, mean: %s +/- %s)' % args
+        )
 
-        return candidate_probs
+        if actor.edge_gen is None:
+            candidate_prob_quads = None
+            candidate_quads = None
+        else:
+            candidate_prob_quads = [
+                (str(aid1), str(aid2), prob, ALGO_AUG_NAME)
+                for (aid1, aid2), prob in zip(candidate_edges, candidate_probs)
+            ]
+            candidate_quads = actor.edge_gen.new_edges_from_verifier(
+                candidate_prob_quads, db_add=False
+            )
+
+        return candidate_probs, candidate_prob_quads, candidate_quads
 
     def _refresh_data(actor, warmup=False, desired_states=None):
-        aids_set = set(actor.infr.aids)
-
         if desired_states is None:
             desired_states = [POSTV, NEGTV, INCMP, UNREV, UNKWN]
+            desired_states = desired_states + [desired_states]
 
         # Run LNBNN to find matches
         candidate_edges = []
         for desired_state in desired_states:
+            if isinstance(desired_state, list):
+                desired_states_ = desired_state
+            else:
+                desired_states_ = [desired_state]
             candidate_edges += actor.infr.find_lnbnn_candidate_edges(
-                desired_states=[desired_state],
+                desired_states=desired_states_,
                 can_match_samename=True,
             )
             candidate_edges += actor.infr.find_lnbnn_candidate_edges(
-                desired_states=[desired_state],
+                desired_states=desired_states_,
                 can_match_samename=False,
             )
 
         candidate_edges = list(set(candidate_edges))
-
-        logger.info('LNBNN %d candidate edges' % (len(candidate_edges),))
+        logger.info('Edges from LNBNN ranking %d' % (len(candidate_edges),))
 
         # Run VAMP on candidates
-        candidate_probs = actor._candidate_edge_probs(candidate_edges)
+        candidate_probs, _, candidate_quads = actor._candidate_edge_probs(candidate_edges)
 
         # Requested warm-up, return this data immediately
         if warmup:
             warmup_data = candidate_edges, candidate_probs
             return warmup_data
 
+        assert None not in [actor.infr, actor.db, actor.edge_gen]
+
+        # Clear out all existing human edge weights, we will repopulate using reviews
+        actor.db._cleanup_edges(max_human=0)
+
+        # Initialize edge weights from reviews
+        review_quads, review_quads_ext = actor._init_edge_weights_using_reviews()
+        actor.db.add_edges_db(review_quads)
+
+        # Initialize the edge weights from LNBNN
+        actor.db.add_edges_db(candidate_quads)
+
         # Collect verifier results from LNBNN matches and VAMP scores
-        verifier_results = []
-        for candidate_edge, candidate_prob in zip(candidate_edges, candidate_probs):
-            aid1, aid2 = candidate_edge
-            assert aid1 in aids_set and aid2 in aids_set
-            aid1_, aid2_ = str(aid1), str(aid2)
-            verifier_result = (aid1_, aid2_, candidate_prob, 'vamp')
-            verifier_results.append(verifier_result)
+        weight_rowid_list = actor.infr.ibs._get_all_edge_weight_rowids()
+        weight_edge_list = actor.infr.ibs.get_edge_weight_aid_tuple(weight_rowid_list)
+        weight_edge_list = list(set(weight_edge_list))
 
-        # Get existing reviews from staging
-        review_rowids = actor.infr.ibs._get_all_review_rowids()
-        review_rowids = sorted(review_rowids)
-        review_decisions = actor.infr.ibs.get_review_decision(review_rowids)
-        review_edges = actor.infr.ibs.get_review_aid_tuple(review_rowids)
+        # Update all VAMP edges in database
+        _, verifier_prob_quads, verifier_quads = actor._candidate_edge_probs(
+            weight_edge_list
+        )
+        actor.db.add_edges_db(verifier_quads)
 
-        # Collect human decisions from existing reviews
+        verifier_results = verifier_prob_quads
+        logger.info('Using %d VAMP edge weights' % (len(verifier_results),))
+
+        # Collect human decisions
         human_decisions = []
-        for review_decision, review_edge in zip(review_decisions, review_edges):
-            if review_decision == const.EVIDENCE_DECISION.POSITIVE:
+        for aid1, aid2, decision, weight, aug_name in review_quads_ext:
+            if not is_aug_name_human(aug_name):
+                continue
+            if decision == POSTV:
                 flag = True
-            elif review_decision == const.EVIDENCE_DECISION.NEGATIVE:
+            elif decision == NEGTV:
                 flag = False
+            elif decision == INCMP:
+                flag = None
             else:
+                # UNREV, UNKWN
                 continue
-            aid1, aid2 = review_edge
-            if aid1 not in aids_set or aid2 not in aids_set:
-                continue
-            aid1_, aid2_ = str(aid1), str(aid2)
-            human_decision = (aid1_, aid2_, flag)
+            human_decision = (aid1, aid2, flag)
             human_decisions.append(human_decision)
+        logger.info('Using %d human decisions' % (len(human_decisions),))
+
+        # Sanity check
+        actor.db._cleanup_edges()
+        weight_rowid_list = actor.infr.ibs._get_all_edge_weight_rowids()
+        assert len(weight_rowid_list) == len(verifier_results) + len(human_decisions)
+
+        # Purge database of edges
+        actor.db._cleanup_edges(max_human=0, max_auto=0)
+        weight_rowid_list = actor.infr.ibs._get_all_edge_weight_rowids()
+        assert len(weight_rowid_list) == 0
 
         # Get the clusters to check
         cluster_ids_to_check = actor.config.get('init_nids')
@@ -861,37 +1021,32 @@ class LCAActor(GraphActor):
                 actor.db,
                 actor.edge_gen,
                 actor.ga_params,
-                db_add_on_init=True,
             )
 
         actor.phase = 2
         actor.loop_phase = 'run_all_ccPICs'
 
+        actor.ga_gen = actor.driver.run_all_ccPICs(yield_on_paused=True)
+
         changes_to_review = None
         while True:
-            changes_to_review = actor.driver.run_all_ccPICs(return_on_paused=True)
+            try:
+                changes_to_review = next(actor.ga_gen)
+            except StopIteration:
+                break
 
             if changes_to_review is not None:
                 break
 
             requested_human_edges = []
-            keep_edge_requests = []
-            for edge in actor.edge_gen.edge_requests:
+            for edge in actor.edge_gen.get_edge_requests():
                 aid1_, aid2_, aug_name = edge
-                if aug_name == 'human':
+                if is_aug_name_human(aug_name):
                     aid1, aid2 = int(aid1_), int(aid2_)
                     requested_human_edges.append((aid1, aid2))
-                else:
-                    keep_edge_requests.append(edge)
-            actor.edge_gen.edge_requests = keep_edge_requests
 
-            args = (
-                len(requested_human_edges),
-                len(keep_edge_requests),
-            )
-            logger.info(
-                'Received %d human edge requests, kept %d requests in queue' % args
-            )
+            args = (len(requested_human_edges),)
+            logger.info('Received %d human edge requests' % args)
 
             user_request = []
             for edge in requested_human_edges:

@@ -201,7 +201,6 @@ class ga_driver(object):  # NOQA
         db,
         edge_gen,
         ga_params,
-        db_add_on_init=True,
     ):
         logger.info('=============================================')
         logger.info('Start of graph algorithm overall driver which')
@@ -217,15 +216,29 @@ class ga_driver(object):  # NOQA
         self.ga_params = ga_params
 
         self.edge_quads = []
-        self.edge_quads += self.edge_gen.new_edges_from_verifier(
-            verifier_results, db_add=db_add_on_init
-        )
-        self.edge_quads += self.edge_gen.new_edges_from_human(
-            human_decisions, db_add=db_add_on_init
-        )
+        self.edge_quads += self.edge_gen.new_edges_from_verifier(verifier_results)
+        self.edge_quads += self.edge_gen.new_edges_from_human(human_decisions)
         logger.info('Formed incoming graph edge quads to initiate LCA:')
+
+        quad_dict = {}
         for q in self.edge_quads:
-            logger.info('   (%a, %a, %d, %s)' % (q[0], q[1], q[2], q[3]))
+            n1, n2, w, algo = q
+            logger.info('   (%a, %a, %d, %s)' % (n1, n2, w, algo))
+            if algo not in quad_dict:
+                quad_dict[algo] = {
+                    '-': 0,
+                    '0': 0,
+                    '+': 0,
+                }
+            if w < 0:
+                tag = '-'
+            elif w > 0:
+                tag = '+'
+            else:
+                tag = '0'
+            quad_dict[algo][tag] += 1
+        logger.info('Incoming edge quad summary: %r' % (quad_dict,))
+
         if len(cluster_ids_to_check) == 0:
             logger.info('No particular clusters to check using LCA (this is typical)')
         else:
@@ -321,7 +334,7 @@ class ga_driver(object):  # NOQA
         for e, c in self.ccPICs:
             logger.info('    %d edges involving %d current clusters' % (len(e), len(c)))
 
-    def run_ga_on_ccPIC(self, ccPIC_edges, ccPIC_clustering, return_on_paused=False):
+    def run_ga_on_ccPIC(self, ccPIC_edges, ccPIC_clustering, yield_on_paused=False):
         gai = ga.graph_algorithm(
             ccPIC_edges,
             ccPIC_clustering.values(),
@@ -358,8 +371,8 @@ class ga_driver(object):  # NOQA
             paused, iter_num, converged = gai.run_main_loop(
                 iter_num, iter_num + num_iter_to_run
             )
-            if paused and return_on_paused:
-                return None
+            if yield_on_paused and paused:
+                yield None
 
         """
         Compute and then return the final information - the changes to
@@ -381,21 +394,29 @@ class ga_driver(object):  # NOQA
             cc.log_change()
 
         logger.info('')
-        return changes
+        yield changes
 
-    def run_all_ccPICs(self, return_on_paused=False):
+    def run_all_ccPICs(self, yield_on_paused=False):
 
         changes_to_review = []
         for edges, clustering in self.ccPICs:
-            changes = self.run_ga_on_ccPIC(
-                edges, clustering, return_on_paused=return_on_paused
+            ga_gen = self.run_ga_on_ccPIC(
+                edges, clustering, yield_on_paused=yield_on_paused
             )
-            if changes is None:
-                return None
+
+            while True:
+                try:
+                    changes = next(ga_gen)
+                except StopIteration:
+                    break
+                if changes is None:
+                    yield changes
+                else:
+                    break
             changes_to_review.append(changes)
 
         self.changes_to_review = changes_to_review
-        return self.changes_to_review
+        yield self.changes_to_review
 
 
 def test_ga_driver():

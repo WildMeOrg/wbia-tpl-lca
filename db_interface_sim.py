@@ -24,23 +24,22 @@ class db_interface_sim(db_interface.db_interface):  # NOQA
         for n0, n1, w, aug_name in quads:
             attrib = self.edge_graph[n0][n1]
             if aug_name == 'human':
-                if 'human' in attrib:
-                    attrib['human'].append(w)
-                else:
-                    attrib['human'] = [w]
+                if 'human' not in attrib:
+                    attrib['human'] = []
+                attrib['human'].append(w)
             else:
                 attrib[aug_name] = w
 
-    def get_weight_db(self, triple):
-        n0, n1, aug_name = triple
-        try:
-            attrib = self.edge_graph[n0][n1]
-            if aug_name == 'human':
-                return sum(attrib['human'])
-            else:
-                return attrib[aug_name]
-        except KeyError:
-            return None
+    # def get_weight_db(self, triple):
+    #     n0, n1, aug_name = triple
+    #     try:
+    #         attrib = self.edge_graph[n0][n1]
+    #         if aug_name == 'human':
+    #             return sum(attrib['human'])
+    #         else:
+    #             return attrib[aug_name]
+    #     except KeyError:
+    #         return None
 
     def edges_from_attributes_db(self, n0, n1):
         quads = []
@@ -130,7 +129,13 @@ def test_db_interface_sim():
     answers = [22, -5, -6, None, None, None, None]
     num_err = 0
     for t, a in zip(triples, answers):
-        res = db.get_weight(t)
+        n0, n1, algo = t
+        attrs = db.edges_from_attributes(n0, n1)
+        if attrs is None:
+            res = None
+        else:
+            values = [wgt_ for n0_, n1_, wgt_, algo_ in attrs if algo_ == algo]
+            res = None if len(values) == 0 else sum(values)
         logger.info(
             'Expected %s and got %s'
             % (
