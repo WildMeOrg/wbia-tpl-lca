@@ -120,9 +120,19 @@ class clustering_change(object):  # NOQA
     def print_it(self):
         logger.info('old_clustering %s' % (self.old_clustering,))
         logger.info('new_clustering %s' % (self.new_clustering,))
-        logger.info('query nodes %s' % (self.query_nodes,))
+        logger.info('query_nodes %s' % (self.query_nodes,))
         logger.info('removed_nodes %s' % (self.removed_nodes,))
         logger.info('change_type %s' % (self.change_type,))
+
+    def serialize(self):
+        data = {
+            'old_clustering': self.old_clustering,
+            'new_clustering': self.new_clustering,
+            'query_nodes': self.query_nodes,
+            'removed_nodes': self.removed_nodes,
+            'change_type': self.change_type,
+        }
+        return data
 
 
 def bipartite_cc(from_visited, from_nbrs, to_visited, to_nbrs, from_nodes):
