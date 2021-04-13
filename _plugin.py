@@ -473,15 +473,17 @@ def progress_db(actor, gai, iter_num):
     assert set(node_to_cluster.keys()) == set(ut.flatten(gai.clustering.values()))
     assert set(node_to_cluster.values()) == set(gai.clustering.keys())
 
-    valid_aids = actor.infr.aids
+    valid_aids = []
     valid_nids = []
-    for valid_aid in valid_aids:
+    for valid_aid in actor.infr.aids:
         valid_node = convert_wbia_annot_id_to_lca_node_id(valid_aid)
         valid_cluster = node_to_cluster.get(valid_node, None)
         assert valid_cluster is not None
         valid_nid = valid_cluster
         # valid_nid = convert_lca_cluster_id_to_wbia_name_id(valid_cluster)
-        valid_nids.append(valid_nid)
+        if valid_nid is not None:
+            valid_aids.append(valid_aid)
+            valid_nids.append(valid_nid)
 
     ggr_name_dates_stats = get_ggr_stats(
         actor.infr.ibs,
@@ -491,6 +493,8 @@ def progress_db(actor, gai, iter_num):
     with open(LOG_FILE, 'a') as logfile:
         data = (
             iter_num,
+            len(set(valid_aids)),
+            len(set(valid_nids)),
             num_names,
             ggr_name_dates_stats['GGR-16 D1 OR D2'],
             ggr_name_dates_stats['GGR-16 PL INDEX'],
@@ -1377,6 +1381,8 @@ class LCAActor(GraphActor):
         with open(LOG_FILE, 'a') as logfile:
             header = (
                 'ITER',
+                'VALID_AIDS',
+                'VALID_NIDS',
                 'NAMES',
                 'NAMES_16',
                 'PL_INDEX_16',
