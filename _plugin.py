@@ -9,6 +9,7 @@ from wbia.algo.graph.core import _rectify_decision
 import numpy as np
 import logging
 import utool as ut
+from functools import partial
 
 from wbia_lca import db_interface
 from wbia_lca import edge_generator
@@ -44,6 +45,9 @@ ALGO_IDENTITY_PREFIX = '%s:' % (ALGO_IDENTITY.split(':')[0],)
 
 
 USE_AUTOREVIEW = ut.get_argflag('--lca-autoreview')
+
+
+LOG_FILE = 'reviews.csv'
 
 
 @register_ibs_method
@@ -326,6 +330,172 @@ def convert_lca_node_id_to_wbia_annot_id(lca_node_id):
 def convert_wbia_annot_id_to_lca_node_id(wbia_annot_id):
     lca_node_id = '%05d' % (wbia_annot_id,)
     return lca_node_id
+
+
+def get_dates(ibs, gid_list, gmt_offset=3.0):
+    unixtime_list = ibs.get_image_unixtime2(gid_list)
+    unixtime_list = [unixtime + (gmt_offset * 60 * 60) for unixtime in unixtime_list]
+    datetime_list = [
+        'UNKNOWN'
+        if unixtime is None or np.isnan(unixtime)
+        else ut.unixtime_to_datetimestr(unixtime)
+        for unixtime in unixtime_list
+    ]
+    date_str_list = [value[:10] for value in datetime_list]
+    return date_str_list
+
+
+def get_ggr_stats(ibs, valid_aids=None):
+    from wbia.other.dbinfo import sight_resight_count
+
+    if valid_aids is None:
+        valid_aids = ibs.get_valid_aids()
+
+    valid_nids_ = ibs.get_annot_nids(valid_aids)
+    valid_gids_ = ibs.get_annot_gids(valid_aids)
+    date_str_list_ = get_dates(ibs, valid_gids_)
+
+    name_dates_stats = {}
+    for valid_aid, valid_nid, date_str in zip(valid_aids, valid_nids_, date_str_list_):
+        if valid_nid < 0:
+            continue
+        if valid_nid not in name_dates_stats:
+            name_dates_stats[valid_nid] = set([])
+        name_dates_stats[valid_nid].add(date_str)
+
+    valid_date_strs = set(
+        [
+            '2016/01/30',
+            '2016/01/31',
+            '2018/01/27',
+            '2018/01/28',
+        ]
+    )
+
+    ggr_name_dates_stats = {
+        'GGR-16 D1 OR D2': 0,
+        'GGR-16 D1 AND D2': 0,
+        'GGR-18 D1 OR D2': 0,
+        'GGR-18 D1 AND D2': 0,
+        'GGR-16 AND GGR-18': 0,
+        '0 Days': 0,
+        '1+ Days': 0,
+        '2+ Days': 0,
+        '3+ Days': 0,
+        '4+ Days': 0,
+    }
+    for date_str in sorted(set(date_str_list_) | valid_date_strs):
+        if date_str not in valid_date_strs:
+            continue
+        ggr_name_dates_stats[date_str] = 0
+
+    for nid in name_dates_stats:
+        date_strs = name_dates_stats[nid]
+        date_strs = list(set(date_strs) & valid_date_strs)
+        total_days = len(date_strs)
+        assert 0 <= total_days and total_days <= 4
+        if total_days == 0:
+            key = '0 Days'
+            ggr_name_dates_stats[key] += 1
+
+        for val in range(1, total_days + 1):
+            key = '%d+ Days' % (val,)
+            ggr_name_dates_stats[key] += 1
+        for date_str in date_strs:
+            ggr_name_dates_stats[date_str] += 1
+        if '2016/01/30' in date_strs or '2016/01/31' in date_strs:
+            ggr_name_dates_stats['GGR-16 D1 OR D2'] += 1
+            if '2018/01/27' in date_strs or '2018/01/28' in date_strs:
+                ggr_name_dates_stats['GGR-16 AND GGR-18'] += 1
+        if '2018/01/27' in date_strs or '2018/01/28' in date_strs:
+            ggr_name_dates_stats['GGR-18 D1 OR D2'] += 1
+        if '2016/01/30' in date_strs and '2016/01/31' in date_strs:
+            ggr_name_dates_stats['GGR-16 D1 AND D2'] += 1
+        if '2018/01/27' in date_strs and '2018/01/28' in date_strs:
+            ggr_name_dates_stats['GGR-18 D1 AND D2'] += 1
+
+    ggr16_pl_index, ggr16_pl_error = sight_resight_count(
+        ggr_name_dates_stats['2016/01/30'],
+        ggr_name_dates_stats['2016/01/31'],
+        ggr_name_dates_stats['GGR-16 D1 AND D2'],
+    )
+    ggr_name_dates_stats['GGR-16 PL INDEX'] = '%0.01f' % (ggr16_pl_index,)
+    ggr_name_dates_stats['GGR-16 PL CI'] = '%0.01f' % (ggr16_pl_error,)
+    ggr_name_dates_stats['GGR-16 PL INDEX STR'] = '%0.01f +/- %0.01f' % (
+        ggr16_pl_index,
+        ggr16_pl_error,
+    )
+    total = ggr_name_dates_stats['GGR-16 D1 OR D2']
+    if ggr16_pl_index == 0:
+        ggr_name_dates_stats['GGR-16 COVERAGE'] = 'UNDEFINED'
+    else:
+        ggr_name_dates_stats['GGR-16 COVERAGE'] = '%0.01f (%0.01f - %0.01f)' % (
+            100.0 * total / ggr16_pl_index,
+            100.0 * total / (ggr16_pl_index + ggr16_pl_error),
+            100.0 * min(1.0, total / (ggr16_pl_index - ggr16_pl_error)),
+        )
+
+    ggr18_pl_index, ggr18_pl_error = sight_resight_count(
+        ggr_name_dates_stats['2018/01/27'],
+        ggr_name_dates_stats['2018/01/28'],
+        ggr_name_dates_stats['GGR-18 D1 AND D2'],
+    )
+    ggr_name_dates_stats['GGR-18 PL INDEX'] = '%0.01f' % (ggr18_pl_index,)
+    ggr_name_dates_stats['GGR-18 PL CI'] = '%0.01f' % (ggr18_pl_error,)
+    ggr_name_dates_stats['GGR-18 PL INDEX STR'] = '%0.01f +/- %0.01f' % (
+        ggr18_pl_index,
+        ggr18_pl_error,
+    )
+    total = ggr_name_dates_stats['GGR-18 D1 OR D2']
+    if ggr18_pl_index == 0:
+        ggr_name_dates_stats['GGR-18 COVERAGE'] = 'UNDEFINED'
+    else:
+        ggr_name_dates_stats['GGR-18 COVERAGE'] = '%0.01f (%0.01f - %0.01f)' % (
+            100.0 * total / ggr18_pl_index,
+            100.0 * total / (ggr18_pl_index + ggr18_pl_error),
+            100.0 * min(1.0, total / (ggr18_pl_index - ggr18_pl_error)),
+        )
+
+    return ggr_name_dates_stats
+
+
+def progress_db(actor, gai, iter_num):
+    reviews = dict(zip(gai.weight_mgr.aug_names, gai.weight_mgr.counts))
+    num_reviews_auto = reviews[ALGO_AUG_NAME]
+    num_reviews_user = reviews[HUMAN_AUG_NAME]
+    num_names = len(gai.clustering)
+    num_todo = gai.queues.num_lcas()
+
+    ggr_name_dates_stats = get_ggr_stats(
+        actor.infr.ibs,
+        actor.infr.aids,
+    )
+    with open(LOG_FILE, 'a') as logfile:
+        data = (
+            iter_num,
+            num_names,
+            ggr_name_dates_stats['GGR-16 D1 OR D2'],
+            ggr_name_dates_stats['GGR-16 PL INDEX'],
+            ggr_name_dates_stats['GGR-16 PL CI'],
+            ggr_name_dates_stats['2016/01/30'],
+            ggr_name_dates_stats['2016/01/31'],
+            ggr_name_dates_stats['GGR-16 D1 AND D2'],
+            ggr_name_dates_stats['GGR-16 COVERAGE'],
+            ggr_name_dates_stats['GGR-18 D1 OR D2'],
+            ggr_name_dates_stats['GGR-18 PL INDEX'],
+            ggr_name_dates_stats['GGR-18 PL CI'],
+            ggr_name_dates_stats['2018/01/27'],
+            ggr_name_dates_stats['2018/01/28'],
+            ggr_name_dates_stats['GGR-18 D1 AND D2'],
+            ggr_name_dates_stats['GGR-18 COVERAGE'],
+            ggr_name_dates_stats['GGR-16 AND GGR-18'],
+            num_reviews_auto,
+            num_reviews_user,
+            num_todo,
+        )
+        line = ','.join(map(str, data))
+        logger.info('Progress: %s' % (line,))
+        logfile.write('%s\n' % (line,))
 
 
 class db_interface_wbia(db_interface.db_interface):  # NOQA
@@ -674,8 +844,8 @@ class LCAActor(GraphActor):
             'prob_human_correct': 0.97,
 
             'min_delta_converge_multiplier': 0.95,
-            # 'min_delta_stability_ratio': 8,
-            'min_delta_stability_ratio': 4,
+            'min_delta_stability_ratio': 8,
+            # 'min_delta_stability_ratio': 4,
             'num_per_augmentation': 2,
 
             'tries_before_edge_done': 4,
@@ -688,12 +858,14 @@ class LCAActor(GraphActor):
             'drawing_prefix': 'wbia_lca',
         }
 
+        prob_human_correct = actor.ga_params.get('prob_human_correct', 0.97)
         actor.config = {
             'warmup.n_peek': 50,
             'weighter_required_reviews': 50,
             'weighter_recent_reviews': 500,
             'init_nids': [],
             'autoreview.enabled': USE_AUTOREVIEW,
+            'autoreview.prob_human_correct': prob_human_correct,
         }
         # fmt: on
 
@@ -827,7 +999,7 @@ class LCAActor(GraphActor):
                         min_edges,
                     )
                     logger.info('WARMUP failed: key %r has %d edges, needs %d' % args)
-                    # return False
+                    return False
 
                 thresh_edges = -1 * min(num_edges, max_edges)
                 edges = edges[thresh_edges:]
@@ -971,8 +1143,8 @@ class LCAActor(GraphActor):
 
     def _refresh_data(actor, warmup=False, desired_states=None):
         if desired_states is None:
-            desired_states = [POSTV, NEGTV, INCMP, UNREV, UNKWN]
-            desired_states = desired_states + [desired_states]
+            desired_states = [POSTV, NEGTV, INCMP, UNKWN, UNREV]
+            desired_states = [desired_states] + desired_states
 
         # Run LNBNN to find matches
         candidate_edges = []
@@ -1047,8 +1219,8 @@ class LCAActor(GraphActor):
 
         # Sanity check
         actor.db._cleanup_edges()
-        weight_rowid_list = actor.infr.ibs.get_edge_weight_rowids_between(actor.infr.aids)
-        assert len(weight_rowid_list) == len(verifier_results) + len(human_decisions)
+        # weight_rowid_list = actor.infr.ibs.get_edge_weight_rowids_between(actor.infr.aids)
+        # assert len(weight_rowid_list) == len(verifier_results) + len(human_decisions)
 
         # Purge database of edges
         actor.db._cleanup_edges(max_human=0, max_auto=0)
@@ -1080,12 +1252,17 @@ class LCAActor(GraphActor):
                 aid1, aid2 = edge
                 name1, name2 = actor.infr.ibs.get_annot_names([aid1, aid2])
 
+                oracle = random.uniform(0.0, 1.0)
+                prob_human_correct = actor.config.get('autoreview.prob_human_correct')
+                prob_human_incorrect = 1.0 - prob_human_correct
+                throw_incorrect = oracle <= prob_human_incorrect
+
                 if const.UNKNOWN in [name1, name2]:
                     evidence_decision = None
                 elif name1 == name2:
-                    evidence_decision = POSTV
+                    evidence_decision = NEGTV if throw_incorrect else POSTV
                 elif name1 != name2:
-                    evidence_decision = NEGTV
+                    evidence_decision = POSTV if throw_incorrect else NEGTV
                 else:
                     raise ValueError()
 
@@ -1101,12 +1278,16 @@ class LCAActor(GraphActor):
                     'timestamp_c2': None,
                     'tags': [],
                 }
+                message = ' (THROWING INTENTIONALLY INCORRECT DECISION, p=%0.02f)' % (
+                    prob_human_correct,
+                )
                 args = (
                     edge,
                     evidence_decision,
+                    message if throw_incorrect else '',
                 )
-                logger.info('HUMAN AUTOREVIEWING EDGE %r -> %r' % args)
-                actor.edge_gen.add_feedback(**feedback)
+                logger.info('HUMAN AUTOREVIEWING EDGE %r -> %r%s' % args)
+                actor.feedback(**feedback)
             return None
         else:
             return user_request
@@ -1175,7 +1356,39 @@ class LCAActor(GraphActor):
         actor.phase = 2
         actor.loop_phase = 'run_all_ccPICs'
 
-        actor.ga_gen = actor.driver.run_all_ccPICs(yield_on_paused=True)
+        with open(LOG_FILE, 'a') as logfile:
+            header = (
+                'ITER',
+                'NAMES',
+                'NAMES_16',
+                'PL_INDEX_16',
+                'PL_CI_16',
+                'DAY1_16',
+                'DAY2_16',
+                'RESIGHT_16',
+                'COVERAGE_16',
+                'NAMES_18',
+                'PL_INDEX_18',
+                'PL_CI_18',
+                'DAY1_18',
+                'DAY2_18',
+                'RESIGHT_18',
+                'COVERAGE_18',
+                'RESIGHT_16_18',
+                'AUTO',
+                'HUMAN',
+                'TODO',
+            )
+            data = [''] * len(header)
+            line = ','.join(map(str, data))
+            logfile.write('%s\n' % (line,))
+            line = ','.join(map(str, header))
+            logfile.write('%s\n' % (line,))
+
+        partial_progress_cb = partial(progress_db, actor)
+        actor.ga_gen = actor.driver.run_all_ccPICs(
+            yield_on_paused=True, progress_cb=partial_progress_cb
+        )
 
         changes_to_review = []
         while True:

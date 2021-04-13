@@ -334,7 +334,9 @@ class ga_driver(object):  # NOQA
         for e, c in self.ccPICs:
             logger.info('    %d edges involving %d current clusters' % (len(e), len(c)))
 
-    def run_ga_on_ccPIC(self, ccPIC_edges, ccPIC_clustering, yield_on_paused=False):
+    def run_ga_on_ccPIC(
+        self, ccPIC_edges, ccPIC_clustering, yield_on_paused=False, progress_cb=None
+    ):
         gai = ga.graph_algorithm(
             ccPIC_edges,
             ccPIC_clustering.values(),
@@ -356,6 +358,7 @@ class ga_driver(object):  # NOQA
         gai.set_result_cbs(...)  # Get current clustering
         gai.set_log_contents_cbs(...)  #
         """
+        gai.set_progress_cb(progress_cb)
 
         """
         This runs the main loop 10 iterations at a time in a while
@@ -396,11 +399,14 @@ class ga_driver(object):  # NOQA
         logger.info('')
         yield changes
 
-    def run_all_ccPICs(self, yield_on_paused=False):
+    def run_all_ccPICs(self, yield_on_paused=False, progress_cb=None):
         changes_to_review = []
         for edges, clustering in self.ccPICs:
             ga_gen = self.run_ga_on_ccPIC(
-                edges, clustering, yield_on_paused=yield_on_paused
+                edges,
+                clustering,
+                yield_on_paused=yield_on_paused,
+                progress_cb=progress_cb,
             )
 
             while True:

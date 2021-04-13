@@ -232,6 +232,7 @@ class graph_algorithm(object):  # NOQA
         self.trace_start_human_gt_cb = None
         self.trace_iter_compare_to_gt_cb = None
         self.should_stop_cb = None
+        self.progress_cb = None
         logger.info('Completed graph algorithm initialization')
 
     def set_remove_nodes_cb(self, cb):
@@ -257,6 +258,9 @@ class graph_algorithm(object):  # NOQA
 
     def set_stop_check_cb(self, cb):
         self.stop_check_cb = cb
+
+    def set_progress_cb(self, cb):
+        self.progress_cb = cb
 
     def generate_new_cids(self, k):
         lower = self._next_cid
@@ -356,6 +360,9 @@ class graph_algorithm(object):  # NOQA
             iter_num += 1
             logger.info('')
             logger.info('*** Iteration %d ***' % iter_num)
+
+            if self.progress_cb is not None:
+                self.progress_cb(self, iter_num)
 
             #  Prepare for the start of the next iteration
             self.remove_nodes()
@@ -474,6 +481,9 @@ class graph_algorithm(object):  # NOQA
                     'Surpassed maximum number of human decisions with %d' % num_human
                 )
                 converged = True
+
+        if self.progress_cb is not None:
+            self.progress_cb(self, iter_num)
 
         logger.info(
             '*** Iteration %d Status Update - paused: %s, converged %s'
