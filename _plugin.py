@@ -33,6 +33,7 @@ register_route = controller_inject.get_wbia_flask_route(__name__)
 register_preproc_image = controller_inject.register_preprocs['image']
 register_preproc_annot = controller_inject.register_preprocs['annot']
 
+AUTOREVIEW_IDENTITY = 'user:autoreview'
 
 HUMAN_AUG_NAME = 'human'
 HUMAN_IDENTITY = 'user:web'
@@ -40,6 +41,9 @@ HUMAN_IDENTITY_PREFIX = '%s:' % (HUMAN_IDENTITY.split(':')[0],)
 ALGO_AUG_NAME = 'vamp'
 ALGO_IDENTITY = 'algo:vamp'
 ALGO_IDENTITY_PREFIX = '%s:' % (ALGO_IDENTITY.split(':')[0],)
+
+
+USE_AUTOREVIEW = ut.get_argflag('--lca-autoreview')
 
 
 @register_ibs_method
@@ -670,7 +674,8 @@ class LCAActor(GraphActor):
             'prob_human_correct': 0.97,
 
             'min_delta_converge_multiplier': 0.95,
-            'min_delta_stability_ratio': 8,
+            # 'min_delta_stability_ratio': 8,
+            'min_delta_stability_ratio': 4,
             'num_per_augmentation': 2,
 
             'tries_before_edge_done': 4,
@@ -688,6 +693,7 @@ class LCAActor(GraphActor):
             'weighter_required_reviews': 50,
             'weighter_recent_reviews': 500,
             'init_nids': [],
+            'autoreview.enabled': USE_AUTOREVIEW,
         }
         # fmt: on
 
@@ -942,6 +948,7 @@ class LCAActor(GraphActor):
         logger.info(
             'VAMP probabilities on %d edges (range: %s - %s, mean: %s +/- %s)' % args
         )
+        logger.info(ut.repr2(list(zip(candidate_edges, candidate_probs))))
 
         if actor.edge_gen is None:
             candidate_prob_quads = None
@@ -1066,6 +1073,44 @@ class LCAActor(GraphActor):
         edge_data['n_ccs'] = (-1, -1)
         return (edge, priority, edge_data)
 
+    def _attempt_autoreview(actor, user_request):
+        if actor.config.get('autoreview.enabled'):
+            for review_request in user_request:
+                edge, priority, edge_data = review_request
+                aid1, aid2 = edge
+                name1, name2 = actor.infr.ibs.get_annot_names([aid1, aid2])
+
+                if const.UNKNOWN in [name1, name2]:
+                    evidence_decision = None
+                elif name1 == name2:
+                    evidence_decision = POSTV
+                elif name1 != name2:
+                    evidence_decision = NEGTV
+                else:
+                    raise ValueError()
+
+                feedback = {
+                    'edge': edge,
+                    'user_id': AUTOREVIEW_IDENTITY,
+                    'confidence': const.CONFIDENCE.CODE.PRETTY_SURE,
+                    'evidence_decision': evidence_decision,
+                    'meta_decision': NULL,
+                    'timestamp': None,
+                    'timestamp_s1': None,
+                    'timestamp_c1': None,
+                    'timestamp_c2': None,
+                    'tags': [],
+                }
+                args = (
+                    edge,
+                    evidence_decision,
+                )
+                logger.info('HUMAN AUTOREVIEWING EDGE %r -> %r' % args)
+                actor.edge_gen.add_feedback(**feedback)
+            return None
+        else:
+            return user_request
+
     def main_gen(actor):
         actor.phase = 0
         actor.loop_phase = 'warmup'
@@ -1098,9 +1143,12 @@ class LCAActor(GraphActor):
                     edge,
                 )
                 # logger.info('WARMUP: bucket %r, edge %r' % args)
-                # Yield a bunch of random edges (from stratified buckets) to the user
+                # create a bunch of random edges (from stratified buckets) to the user
                 user_request += [actor._make_review_tuple(edge)]
-            yield user_request
+
+            user_request = actor._attempt_autoreview(user_request)
+            if user_request is not None:
+                yield user_request
 
             # Try to re-initialize LCA
             actor._init_lca()
@@ -1152,7 +1200,9 @@ class LCAActor(GraphActor):
                 for edge in requested_human_edges:
                     user_request += [actor._make_review_tuple(edge)]
 
-                yield user_request
+                user_request = actor._attempt_autoreview(user_request)
+                if user_request is not None:
+                    yield user_request
             else:
                 changes_to_review.append(change_to_review)
 
