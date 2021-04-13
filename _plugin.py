@@ -345,18 +345,17 @@ def get_dates(ibs, gid_list, gmt_offset=3.0):
     return date_str_list
 
 
-def get_ggr_stats(ibs, valid_aids=None):
+def get_ggr_stats(ibs, valid_aids, valid_nids):
     from wbia.other.dbinfo import sight_resight_count
 
-    if valid_aids is None:
-        valid_aids = ibs.get_valid_aids()
-
-    valid_nids_ = ibs.get_annot_nids(valid_aids)
-    valid_gids_ = ibs.get_annot_gids(valid_aids)
-    date_str_list_ = get_dates(ibs, valid_gids_)
+    # if valid_aids is None:
+    #     valid_aids = ibs.get_valid_aids()
+    # valid_nids_ = ibs.get_annot_nids(valid_aids)
+    valid_gids = ibs.get_annot_gids(valid_aids)
+    date_str_list = get_dates(ibs, valid_gids)
 
     name_dates_stats = {}
-    for valid_aid, valid_nid, date_str in zip(valid_aids, valid_nids_, date_str_list_):
+    for valid_aid, valid_nid, date_str in zip(valid_aids, valid_nids, date_str_list):
         if valid_nid < 0:
             continue
         if valid_nid not in name_dates_stats:
@@ -384,7 +383,7 @@ def get_ggr_stats(ibs, valid_aids=None):
         '3+ Days': 0,
         '4+ Days': 0,
     }
-    for date_str in sorted(set(date_str_list_) | valid_date_strs):
+    for date_str in sorted(set(date_str_list) | valid_date_strs):
         if date_str not in valid_date_strs:
             continue
         ggr_name_dates_stats[date_str] = 0
@@ -466,9 +465,28 @@ def progress_db(actor, gai, iter_num):
     num_names = len(gai.clustering)
     num_todo = gai.queues.num_lcas()
 
+    node_to_cluster = {}
+    for cluster in gai.clustering:
+        for node in gai.clustering[cluster]:
+            assert node not in node_to_cluster
+            node_to_cluster[node] = cluster
+    assert set(node_to_cluster.keys()) == set(ut.flatten(gai.clustering.values()))
+    assert set(node_to_cluster.values()) == set(gai.clustering.keys())
+
+    valid_aids = actor.infr.aids
+    valid_nids = []
+    for valid_aid in valid_aids:
+        valid_node = convert_wbia_annot_id_to_lca_node_id(valid_aid)
+        valid_cluster = node_to_cluster.get(valid_node, None)
+        assert valid_cluster is not None
+        valid_nid = valid_cluster
+        # valid_nid = convert_lca_cluster_id_to_wbia_name_id(valid_cluster)
+        valid_nids.append(valid_nid)
+
     ggr_name_dates_stats = get_ggr_stats(
         actor.infr.ibs,
-        actor.infr.aids,
+        valid_aids,
+        valid_nids,
     )
     with open(LOG_FILE, 'a') as logfile:
         data = (
