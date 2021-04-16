@@ -1292,7 +1292,6 @@ class LCAActor(GraphActor):
                 real_decision = None if len(real_decisions) == 0 else real_decisions[-1]
 
                 if real_decision is None:
-                    decision_source = 'inferred'
                     name1, name2 = actor.infr.ibs.get_annot_names([aid1, aid2])
                     oracle = random.uniform(0.0, 1.0)
                     prob_human_correct = actor.config.get('autoreview.prob_human_correct')
@@ -1307,9 +1306,28 @@ class LCAActor(GraphActor):
                         evidence_decision = POSTV if throw_incorrect else NEGTV
                     else:
                         raise ValueError()
+
+                    if throw_incorrect:
+                        message = (
+                            ' (THROWING INTENTIONALLY INCORRECT DECISION, p=%0.02f)'
+                            % (prob_human_correct,)
+                        )
+                    else:
+                        message = ''
+
+                    decision_source = 'inferred'
                 else:
-                    decision_source = 'matched'
                     evidence_decision = const.EVIDENCE_DECISION.INT_TO_CODE[real_decision]
+                    message = ''
+                    decision_source = 'matched'
+
+                args = (
+                    edge,
+                    evidence_decision,
+                    message,
+                    decision_source,
+                )
+                logger.info('HUMAN AUTOREVIEWING EDGE %r -> %r%s [%s]' % args)
 
                 feedback = {
                     'edge': edge,
@@ -1323,16 +1341,6 @@ class LCAActor(GraphActor):
                     'timestamp_c2': None,
                     'tags': [],
                 }
-                message = ' (THROWING INTENTIONALLY INCORRECT DECISION, p=%0.02f)' % (
-                    prob_human_correct,
-                )
-                args = (
-                    edge,
-                    evidence_decision,
-                    message if throw_incorrect else '',
-                    decision_source,
-                )
-                logger.info('HUMAN AUTOREVIEWING EDGE %r -> %r%s [%s]' % args)
                 actor.feedback(**feedback)
             return None
         else:
