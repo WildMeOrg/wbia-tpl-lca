@@ -1015,13 +1015,16 @@ class LCAActor(GraphActor):
         for algo in verifier_gt:
             for key in verifier_gt[algo]:
                 edges = verifier_gt[algo][key]
+                num_edges_ = len(edges)
+                edges = list(set(edges))
                 num_edges = len(edges)
                 min_edges = actor.config.get('weighter_required_reviews')
                 max_edges = actor.config.get('weighter_recent_reviews')
                 logger.info(
-                    'Found %d review edges for %s %s'
+                    'Found %d de-duplicated review edges (from %d total) for %s %s'
                     % (
                         num_edges,
+                        num_edges_,
                         algo,
                         key,
                     )
@@ -1036,6 +1039,7 @@ class LCAActor(GraphActor):
                     return False
 
                 thresh_edges = -1 * min(num_edges, max_edges)
+                random.shuffle(edges)
                 edges = edges[thresh_edges:]
                 probs, _, _ = actor._candidate_edge_probs(edges)
                 verifier_gt[algo][key] = probs
