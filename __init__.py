@@ -25,7 +25,11 @@ except ImportError:
 
 # from wbia_lca.version import version as __version__  # NOQA
 from wbia_lca import __main__  # NOQA
-from wbia_lca import _plugin  # NOQA
+
+try:
+    from wbia_lca import _plugin  # NOQA
+except ModuleNotFoundError:
+    logger.warn('Wildbook-IA (wbia) needs to be installed')
 
 from wbia_lca import baseline  # NOQA
 from wbia_lca import cid_to_lca  # NOQA
