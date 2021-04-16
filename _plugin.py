@@ -1113,19 +1113,20 @@ class LCAActor(GraphActor):
                 else:
                     evidence_decision = None
 
-                feedback = {
-                    'edge': candidate_edge,
-                    'user_id': ALGO_IDENTITY,
-                    'confidence': const.CONFIDENCE.CODE.PRETTY_SURE,
-                    'evidence_decision': evidence_decision,
-                    'meta_decision': NULL,
-                    'timestamp': None,
-                    'timestamp_s1': None,
-                    'timestamp_c1': None,
-                    'timestamp_c2': None,
-                    'tags': [],
-                }
-                actor.infr.add_feedback(**feedback)
+                if evidence_decision is not None:
+                    feedback = {
+                        'edge': candidate_edge,
+                        'user_id': ALGO_IDENTITY,
+                        'confidence': const.CONFIDENCE.CODE.PRETTY_SURE,
+                        'evidence_decision': evidence_decision,
+                        'meta_decision': NULL,
+                        'timestamp': None,
+                        'timestamp_s1': None,
+                        'timestamp_c1': None,
+                        'timestamp_c2': None,
+                        'tags': [],
+                    }
+                    actor.infr.add_feedback(**feedback)
             actor.infr.write_wbia_staging_feedback()
 
         candidate_probs = []
