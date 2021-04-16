@@ -46,8 +46,11 @@ ALGO_IDENTITY_PREFIX = '%s:' % (ALGO_IDENTITY.split(':')[0],)
 
 USE_AUTOREVIEW = ut.get_argflag('--lca-autoreview')
 
+USE_COLDSTART = ut.get_argflag('--lca-coldstart')
 
-LOG_FILE = 'reviews.csv'
+
+LOG_DECISION_FILE = 'lca.decisions.csv'
+LOG_LCS_FILE = 'lca.log'
 
 
 @register_ibs_method
@@ -483,7 +486,7 @@ def progress_db(actor, gai, iter_num):
         valid_aids,
         valid_nids,
     )
-    with open(LOG_FILE, 'a') as logfile:
+    with open(LOG_DECISION_FILE, 'a') as logfile:
         data = (
             iter_num,
             len(set(valid_aids)),
@@ -528,6 +531,10 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
         super(db_interface_wbia, self).__init__(edges, clustering)
 
     def _get_existing_clustering(self):
+        if USE_COLDSTART:
+            logger.info('Cold Start: ignoring existing name clustering')
+            return {}
+
         clustering_labels = list(self.infr.pos_graph.component_labels())
         clustering_components = list(self.infr.pos_graph.connected_components())
         assert len(clustering_labels) == len(clustering_components)
@@ -869,6 +876,8 @@ class LCAActor(GraphActor):
             'ga_max_num_waiting': 1000,
 
             'log_level': logging.INFO,
+            'log_file': LOG_LCS_FILE,
+
             'draw_iterations': False,
             'drawing_prefix': 'wbia_lca',
         }
@@ -1190,11 +1199,16 @@ class LCAActor(GraphActor):
 
         assert None not in [actor.infr, actor.db, actor.edge_gen]
 
-        # Clear out all existing human edge weights, we will repopulate using reviews
-        actor.db._cleanup_edges(max_human=0)
-
         # Initialize edge weights from reviews
-        review_quads, review_quads_ext = actor._init_edge_weights_using_reviews()
+        if USE_COLDSTART:
+            # Clear out all existing human edge weights, we will repopulate using reviews
+            actor.db._cleanup_edges(max_human=0, max_auto=0)
+            review_quads, review_quads_ext = actor._init_edge_weights_using_reviews()
+        else:
+            # Clear out all existing human edge weights, we will repopulate using reviews
+            actor.db._cleanup_edges(max_human=0)
+            review_quads, review_quads_ext = [], []
+
         actor.db.add_edges_db(review_quads)
 
         # Initialize the edge weights from LNBNN
@@ -1265,21 +1279,40 @@ class LCAActor(GraphActor):
             for review_request in user_request:
                 edge, priority, edge_data = review_request
                 aid1, aid2 = edge
-                name1, name2 = actor.infr.ibs.get_annot_names([aid1, aid2])
 
-                oracle = random.uniform(0.0, 1.0)
-                prob_human_correct = actor.config.get('autoreview.prob_human_correct')
-                prob_human_incorrect = 1.0 - prob_human_correct
-                throw_incorrect = oracle <= prob_human_incorrect
+                review_rowid_list = actor.infr.ibs.get_review_rowids_from_edges([edge])[0]
+                review_rowid_list = sorted(review_rowid_list)
+                review_decision_list = actor.infr.ibs.get_review_decision(
+                    review_rowid_list
+                )
+                review_identity_list = actor.infr.ibs.get_review_identity(
+                    review_rowid_list
+                )
+                flag_list = [
+                    review_identity.startswith(HUMAN_IDENTITY)
+                    for review_identity in review_identity_list
+                ]
+                real_decisions = ut.compress(review_decision_list, flag_list)
+                # Take the most recent review
+                real_decision = None if len(real_decisions) == 0 else real_decisions[-1]
 
-                if const.UNKNOWN in [name1, name2]:
-                    evidence_decision = None
-                elif name1 == name2:
-                    evidence_decision = NEGTV if throw_incorrect else POSTV
-                elif name1 != name2:
-                    evidence_decision = POSTV if throw_incorrect else NEGTV
+                if real_decision is None:
+                    name1, name2 = actor.infr.ibs.get_annot_names([aid1, aid2])
+                    oracle = random.uniform(0.0, 1.0)
+                    prob_human_correct = actor.config.get('autoreview.prob_human_correct')
+                    prob_human_incorrect = 1.0 - prob_human_correct
+                    throw_incorrect = oracle <= prob_human_incorrect
+
+                    if const.UNKNOWN in [name1, name2]:
+                        evidence_decision = None
+                    elif name1 == name2:
+                        evidence_decision = NEGTV if throw_incorrect else POSTV
+                    elif name1 != name2:
+                        evidence_decision = POSTV if throw_incorrect else NEGTV
+                    else:
+                        raise ValueError()
                 else:
-                    raise ValueError()
+                    evidence_decision = const.EVIDENCE_DECISION.INT_TO_CODE[real_decision]
 
                 feedback = {
                     'edge': edge,
@@ -1371,7 +1404,7 @@ class LCAActor(GraphActor):
         actor.phase = 2
         actor.loop_phase = 'run_all_ccPICs'
 
-        with open(LOG_FILE, 'a') as logfile:
+        with open(LOG_DECISION_FILE, 'a') as logfile:
             header = (
                 'ITER',
                 'VALID_AIDS',
