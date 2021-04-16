@@ -864,14 +864,19 @@ class LCAActor(GraphActor):
             ],
             'prob_human_correct': 0.97,
 
-            'min_delta_converge_multiplier': 0.95,
-            'min_delta_stability_ratio': 8,
-            # 'min_delta_stability_ratio': 4,
-            'num_per_augmentation': 2,
+            # DEFAULT
+            # 'min_delta_converge_multiplier': 0.95,
+            # 'min_delta_stability_ratio': 8,
+            # 'num_per_augmentation': 2,
+            # 'tries_before_edge_done': 4,
 
-            'tries_before_edge_done': 4,
+            # EXTENSIVE
+            'min_delta_converge_multiplier': 0.99,
+            'min_delta_stability_ratio': 2,
+            'num_per_augmentation': 10,
+            'tries_before_edge_done': 10,
 
-            'ga_iterations_before_return': 10,
+            'ga_iterations_before_return': 100,
             'ga_max_num_waiting': 1000,
 
             'log_level': logging.INFO,
