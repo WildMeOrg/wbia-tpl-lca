@@ -892,6 +892,13 @@ class LCAActor(GraphActor):
         }
         # fmt: on
 
+        from wbia_lca import formatter
+
+        handler = logging.FileHandler(actor.ga_params['log_file'])
+        handler.setLevel(actor.ga_params['log_level'])
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
         super(LCAActor, actor).__init__(*args, **kwargs)
 
     def _init_infr(actor, aids, dbdir, **kwargs):
