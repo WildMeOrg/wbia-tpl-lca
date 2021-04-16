@@ -44,9 +44,8 @@ ALGO_IDENTITY = 'algo:vamp'
 ALGO_IDENTITY_PREFIX = '%s:' % (ALGO_IDENTITY.split(':')[0],)
 
 
-USE_AUTOREVIEW = ut.get_argflag('--lca-autoreview')
-
 USE_COLDSTART = ut.get_argflag('--lca-coldstart')
+USE_AUTOREVIEW = ut.get_argflag('--lca-autoreview') or USE_COLDSTART
 
 
 LOG_DECISION_FILE = 'lca.decisions.csv'
@@ -1203,11 +1202,11 @@ class LCAActor(GraphActor):
         if USE_COLDSTART:
             # Clear out all existing human edge weights, we will repopulate using reviews
             actor.db._cleanup_edges(max_human=0, max_auto=0)
-            review_quads, review_quads_ext = actor._init_edge_weights_using_reviews()
+            review_quads, review_quads_ext = [], []
         else:
             # Clear out all existing human edge weights, we will repopulate using reviews
             actor.db._cleanup_edges(max_human=0)
-            review_quads, review_quads_ext = [], []
+            review_quads, review_quads_ext = actor._init_edge_weights_using_reviews()
 
         actor.db.add_edges_db(review_quads)
 
@@ -1245,11 +1244,6 @@ class LCAActor(GraphActor):
             human_decision = (aid1, aid2, flag)
             human_decisions.append(human_decision)
         logger.info('Using %d human decisions' % (len(human_decisions),))
-
-        # Sanity check
-        actor.db._cleanup_edges()
-        # weight_rowid_list = actor.infr.ibs.get_edge_weight_rowids_between(actor.infr.aids)
-        # assert len(weight_rowid_list) == len(verifier_results) + len(human_decisions)
 
         # Purge database of edges
         actor.db._cleanup_edges(max_human=0, max_auto=0)
@@ -1297,6 +1291,7 @@ class LCAActor(GraphActor):
                 real_decision = None if len(real_decisions) == 0 else real_decisions[-1]
 
                 if real_decision is None:
+                    decision_source = 'inferred'
                     name1, name2 = actor.infr.ibs.get_annot_names([aid1, aid2])
                     oracle = random.uniform(0.0, 1.0)
                     prob_human_correct = actor.config.get('autoreview.prob_human_correct')
@@ -1312,6 +1307,7 @@ class LCAActor(GraphActor):
                     else:
                         raise ValueError()
                 else:
+                    decision_source = 'matched'
                     evidence_decision = const.EVIDENCE_DECISION.INT_TO_CODE[real_decision]
 
                 feedback = {
@@ -1333,8 +1329,9 @@ class LCAActor(GraphActor):
                     edge,
                     evidence_decision,
                     message if throw_incorrect else '',
+                    decision_source,
                 )
-                logger.info('HUMAN AUTOREVIEWING EDGE %r -> %r%s' % args)
+                logger.info('HUMAN AUTOREVIEWING EDGE %r -> %r%s [%s]' % args)
                 actor.feedback(**feedback)
             return None
         else:
