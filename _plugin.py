@@ -1159,7 +1159,7 @@ class LCAActor(GraphActor):
         logger.info(
             'VAMP probabilities on %d edges (range: %s - %s, mean: %s +/- %s)' % args
         )
-        logger.info(ut.repr2(list(zip(candidate_edges, candidate_probs))))
+        # logger.info(ut.repr2(list(zip(candidate_edges, candidate_probs))))
 
         if actor.edge_gen is None:
             candidate_prob_quads = None
