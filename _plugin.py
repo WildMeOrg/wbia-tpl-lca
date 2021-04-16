@@ -488,8 +488,6 @@ def progress_db(actor, gai, iter_num):
     with open(LOG_DECISION_FILE, 'a') as logfile:
         data = (
             iter_num,
-            len(set(valid_aids)),
-            len(set(valid_nids)),
             num_names,
             ggr_name_dates_stats['GGR-16 D1 OR D2'],
             ggr_name_dates_stats['GGR-16 PL INDEX'],
@@ -869,15 +867,17 @@ class LCAActor(GraphActor):
             # 'min_delta_stability_ratio': 8,
             # 'num_per_augmentation': 2,
             # 'tries_before_edge_done': 4,
+            # 'ga_max_num_waiting': 1000,
 
             # EXTENSIVE
             'min_delta_converge_multiplier': 0.99,
             'min_delta_stability_ratio': 2,
             'num_per_augmentation': 10,
             'tries_before_edge_done': 10,
+            'ga_max_num_waiting': 1,
 
             'ga_iterations_before_return': 100,
-            'ga_max_num_waiting': 1000,
+            # 'ga_max_num_waiting': 1000,
 
             'log_level': logging.INFO,
             'log_file': LOG_LCS_FILE,
@@ -1425,8 +1425,6 @@ class LCAActor(GraphActor):
         with open(LOG_DECISION_FILE, 'a') as logfile:
             header = (
                 'ITER',
-                'VALID_AIDS',
-                'VALID_NIDS',
                 'NAMES',
                 'NAMES_16',
                 'PL_INDEX_16',
