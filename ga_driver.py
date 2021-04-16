@@ -336,6 +336,7 @@ class ga_driver(object):  # NOQA
 
     def run_ga_on_ccPIC(
         self, ccPIC_edges, ccPIC_clustering, yield_on_paused=False, progress_cb=None
+            other_clustering=None  #  JP: look here!!!
     ):
         gai = ga.graph_algorithm(
             ccPIC_edges,
@@ -396,6 +397,21 @@ class ga_driver(object):  # NOQA
             logger.info('Change %d' % i)
             cc.log_change()
 
+        """
+        JP: LOOK HERE
+        You need to pass in a clustering built from the old graph
+        algorithm.  Call it "other_clustering:.  It must be a
+        dictionary mapping cluster ids to sets of node ids.  It is
+        possible that the nodes together can be a superset of the
+        nodes in the ccPIC --- for example if the ccPIC does not
+        include all the nodes.
+
+        The call is simply
+        """
+        compare_to_other_clustering(gai.clustering, gai.node2cid,
+                                    other_clustering, gai.G)
+
+            
         logger.info('')
         yield changes
 

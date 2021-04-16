@@ -491,6 +491,24 @@ def test_same_clustering():
     logger.info('It returned %s' % (result,))
 
 
+def test_extract_subclustering():
+    clustering = {
+        '0': {'a', 'b', 'c'},
+        '1': {'d', 'e', 'f', 'g'},
+        '2': {'h', 'i', 'j'},
+        '3': {'k'},
+        }
+    nodes = ['k', 'a', 'f', 'e', 'b', 'c']
+    new_c = ct.extract_subclustering(nodes, clustering)
+
+    logger.info("====================")
+    logger.info("test_extract_subclustering")
+    logger.info("length of new should be 3, and it is: %d" % len(new_c))
+    logger.info("new cluster 0 should have {'a', 'b', 'c'}: %a" % new_c['0'])
+    logger.info("new cluster 1 should have {'e', 'f'}: %a" % new_c['1'])
+    logger.info("new cluster 1 should have {'k'}: %a" % new_c['3'])
+
+
 def test_comparisons():
     """"""
     cids = list(ct.cids_from_range(99))
@@ -597,4 +615,5 @@ if __name__ == '__main__':
     test_form_connected_cluster_pairs()
     test_comparisons()
     test_same_clustering()
+    test_extract_subclustering()
     test_count_equal()

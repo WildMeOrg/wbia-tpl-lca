@@ -284,6 +284,19 @@ def same_clustering(clustering0, clustering1, output_differences=False):
     return same
 
 
+def extract_subclustering(nodes, clustering, n2c=None):
+    if n2c is None:
+        n2c = build_node_to_cluster_mapping(clustering)
+    new_clustering = dict()
+    for n in nodes:
+        c = n2c[n]
+        if c in new_clustering:
+            new_clustering[c].add(n)
+        else:
+            new_clustering[c] = set([n])
+    return new_clustering
+
+
 def intersection_over_union(setA, setB):
     if setA == setB:
         return 1
