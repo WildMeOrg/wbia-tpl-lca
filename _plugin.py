@@ -870,14 +870,13 @@ class LCAActor(GraphActor):
             # 'ga_max_num_waiting': 1000,
 
             # EXTENSIVE
-            'min_delta_converge_multiplier': 0.99,
-            'min_delta_stability_ratio': 2,
-            'num_per_augmentation': 10,
-            'tries_before_edge_done': 10,
+            'min_delta_converge_multiplier': 0.95,
+            'min_delta_stability_ratio': 4,
+            'num_per_augmentation': 5,
+            'tries_before_edge_done': 4,
             'ga_max_num_waiting': 1,
 
-            'ga_iterations_before_return': 100,
-            # 'ga_max_num_waiting': 1000,
+            'ga_iterations_before_return': 100,  # IS THIS USED?
 
             'log_level': logging.INFO,
             'log_file': LOG_LCS_FILE,
