@@ -239,7 +239,7 @@ def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
 
     # 3. Form the parameters dictionary and weight objects (one per
     # verification algorithm).
-    ga_params, wgtrs = ga_driver.params_and_weighters(config_ini, verifier_gt)
+    lca_config, wgtrs = ga_driver.params_and_weighters(config_ini, verifier_gt)
     if len(wgtrs) > 1:
         logger.info('Not currently handling more than one weighter!!')
         sys.exit(1)
@@ -257,7 +257,7 @@ def wbia_plugin_lca_sim(ibs, ga_config, verifier_gt, request, db_result=None):
 
     # 5. Form the graph algorithm driver
     driver = ga_driver.ga_driver(
-        verifier_req, human_req, cluster_req, db, edge_gen, ga_params
+        verifier_req, human_req, cluster_req, db, edge_gen, lca_config
     )
 
     # 6. Run it. Changes are logged.
@@ -855,7 +855,30 @@ class LCAActor(GraphActor):
         actor.loop_phase = 'init'
 
         # fmt: off
-        actor.ga_params = {
+        actor.infr_config = {
+            # 'manual.n_peek': 100,
+            # 'autoreview.enabled': True,
+            # 'autoreview.prioritize_nonpos': True,
+            # 'inference.enabled': True,
+            # 'ranking.enabled': True,
+            # 'ranking.ntop': 5,
+            # 'redun.enabled': True,
+            # 'redun.enforce_neg': True,
+            # 'redun.enforce_pos': True,
+            # 'redun.neg.only_auto': False,
+            # 'redun.neg': 2,
+            # 'redun.pos': 2,
+            # 'algo.hardcase': False,
+
+            'autoreview.enabled': False,
+            'inference.enabled': True,
+            'ranking.enabled': True,
+            'ranking.ntop': 20,
+            'redun.enabled': False,
+            'algo.hardcase': False,
+        }
+
+        actor.lca_config = {
             'aug_names': [
                 ALGO_AUG_NAME,
                 HUMAN_AUG_NAME,
@@ -872,7 +895,7 @@ class LCAActor(GraphActor):
             # EXTENSIVE
             'min_delta_converge_multiplier': 0.95,
             'min_delta_stability_ratio': 4,
-            'num_per_augmentation': 5,
+            'num_per_augmentation': 2,
             'tries_before_edge_done': 4,
             'ga_max_num_waiting': 1,
 
@@ -885,7 +908,7 @@ class LCAActor(GraphActor):
             'drawing_prefix': 'wbia_lca',
         }
 
-        prob_human_correct = actor.ga_params.get('prob_human_correct', 0.97)
+        prob_human_correct = actor.lca_config.get('prob_human_correct', 0.97)
         actor.config = {
             'warmup.n_peek': 50,
             'weighter_required_reviews': 50,
@@ -898,8 +921,8 @@ class LCAActor(GraphActor):
 
         from wbia_lca import formatter
 
-        handler = logging.FileHandler(actor.ga_params['log_file'])
-        handler.setLevel(actor.ga_params['log_level'])
+        handler = logging.FileHandler(actor.lca_config['log_file'])
+        handler.setLevel(actor.lca_config['log_level'])
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
@@ -914,7 +937,12 @@ class LCAActor(GraphActor):
 
         # Create the reference AnnotInference
         logger.info('starting via actor with ibs = %r' % (ibs,))
-        actor.infr = wbia.AnnotInference(ibs=ibs, aids=aids, autoinit=True)
+        import utool as ut
+
+        ut.embed()
+        actor.infr = wbia.AnnotInference(
+            ibs=ibs, aids=aids, autoinit=True, config=actor.infr_config
+        )
         actor.infr.print('started via actor')
         actor.infr.print('config = {}'.format(ut.repr3(actor.config)))
 
@@ -1046,12 +1074,12 @@ class LCAActor(GraphActor):
 
         logger.info(ut.repr3(verifier_gt))
 
-        wgtrs = ga_driver.generate_weighters(actor.ga_params, verifier_gt)
+        wgtrs = ga_driver.generate_weighters(actor.lca_config, verifier_gt)
         actor.wgtr = wgtrs[0]
 
         # Update delta score thresholds
-        multiplier = actor.ga_params['min_delta_converge_multiplier']
-        ratio = actor.ga_params['min_delta_stability_ratio']
+        multiplier = actor.lca_config['min_delta_converge_multiplier']
+        ratio = actor.lca_config['min_delta_stability_ratio']
 
         human_gt_positive_weight = actor.wgtr.human_wgt(is_marked_correct=True)
         human_gt_negative_weight = actor.wgtr.human_wgt(is_marked_correct=False)
@@ -1060,8 +1088,8 @@ class LCAActor(GraphActor):
         convergence = -1.0 * multiplier * human_gt_delta_weight
         stability = convergence / ratio
 
-        actor.ga_params['min_delta_score_converge'] = convergence
-        actor.ga_params['min_delta_score_stability'] = stability
+        actor.lca_config['min_delta_score_converge'] = convergence
+        actor.lca_config['min_delta_score_stability'] = stability
 
         logger.info(
             'Using provided   min_delta_converge_multiplier = %0.04f' % (multiplier,)
@@ -1184,6 +1212,10 @@ class LCAActor(GraphActor):
         if desired_states is None:
             desired_states = [POSTV, NEGTV, INCMP, UNKWN, UNREV]
             desired_states = [desired_states] + desired_states
+
+        import utool as ut
+
+        ut.embed()
 
         # Run LNBNN to find matches
         candidate_edges = []
@@ -1419,7 +1451,7 @@ class LCAActor(GraphActor):
                 cluster_ids_to_check,
                 actor.db,
                 actor.edge_gen,
-                actor.ga_params,
+                actor.lca_config,
             )
 
         actor.phase = 2
