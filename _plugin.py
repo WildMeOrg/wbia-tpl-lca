@@ -939,18 +939,13 @@ class LCAActor(GraphActor):
 
         # Create the reference AnnotInference
         logger.info('starting via actor with ibs = %r' % (ibs,))
-        import utool as ut
-
-        ut.embed()
-        actor.infr = wbia.AnnotInference(
-            ibs=ibs, aids=aids, autoinit=True, config=actor.infr_config
-        )
+        actor.infr = wbia.AnnotInference(ibs=ibs, aids=aids, autoinit=True)
         actor.infr.print('started via actor')
-        actor.infr.print('config = {}'.format(ut.repr3(actor.config)))
+        actor.infr.print('config = {}'.format(ut.repr3(actor.infr_config)))
 
         # Configure
-        for key in actor.config:
-            actor.infr.params[key] = actor.config[key]
+        for key in actor.infr_config:
+            actor.infr.params[key] = actor.infr_config[key]
 
         # Pull reviews from staging
         actor.infr.print('Initializing infr tables')
@@ -1214,10 +1209,6 @@ class LCAActor(GraphActor):
         if desired_states is None:
             desired_states = [POSTV, NEGTV, INCMP, UNKWN, UNREV]
             desired_states = [desired_states] + desired_states
-
-        import utool as ut
-
-        ut.embed()
 
         # Run LNBNN to find matches
         candidate_edges = []
