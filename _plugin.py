@@ -524,14 +524,16 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
         self.max_reviews = self.max_auto_reviews + self.max_human_reviews
 
         edges = []
-        clustering = self._get_existing_clustering()
+
+        if USE_COLDSTART:
+            logger.info('Cold Start: ignoring existing name clustering')
+            clustering = {}
+        else:
+            clustering = self._get_existing_clustering()
+
         super(db_interface_wbia, self).__init__(edges, clustering)
 
     def _get_existing_clustering(self):
-        if USE_COLDSTART:
-            logger.info('Cold Start: ignoring existing name clustering')
-            return {}
-
         clustering_labels = list(self.infr.pos_graph.component_labels())
         clustering_components = list(self.infr.pos_graph.connected_components())
         assert len(clustering_labels) == len(clustering_components)
@@ -1435,6 +1437,9 @@ class LCAActor(GraphActor):
             # Try to re-initialize LCA
             actor._init_lca()
 
+        # Get existing clustering of names before processing has started
+        other_clustering = actor.db._get_existing_clustering()
+
         actor.phase = 1
         actor.loop_phase = 'driver'
 
@@ -1488,7 +1493,9 @@ class LCAActor(GraphActor):
 
         partial_progress_cb = partial(progress_db, actor)
         actor.ga_gen = actor.driver.run_all_ccPICs(
-            yield_on_paused=True, progress_cb=partial_progress_cb
+            yield_on_paused=True,
+            progress_cb=partial_progress_cb,
+            other_clustering=other_clustering,
         )
 
         changes_to_review = []

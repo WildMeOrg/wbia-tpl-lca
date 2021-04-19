@@ -212,46 +212,51 @@ def find_changes(old_clustering, old_n2c, new_clustering, new_n2c):
 def write_changes_to_log(s, edges):
     logger.info(s)
     if len(edges) == 0:
-        logger.info("   -none-")
+        logger.info('   -none-')
     else:
         for e in edges:
-            logger.info("   %s" % str(e))
+            logger.info('   %s' % str(e))
 
 
 def compare_to_other_clustering(new_cl, new_n2c, other_cl, G):
-    logger.info("===================================")
-    logger.info("Analyzing difference with other clustering")
+    logger.info('===================================')
+    logger.info('Analyzing difference with other clustering')
     nodes = sorted(new_n2c.keys())
     other_cl = ct.extract_subclustering(nodes, other_cl)
     other_n2c = ct.build_node_to_cluster_mapping(other_cl)
-    differences = find_changes(other_cl, other_n2c, new_cl, new_n2c, )
+    differences = find_changes(
+        other_cl,
+        other_n2c,
+        new_cl,
+        new_n2c,
+    )
 
     for cc in differences:
         if cc.change_type == 'Unchanged':
             continue
-        logger.info("...")
-        c_internal = []      # edges internal to a cluster in both
-        c_between = []       # edges between clusters in both
+        logger.info('...')
+        c_internal = []  # edges internal to a cluster in both
+        c_between = []  # edges between clusters in both
         i_new_internal = []  # edges internal in new clustering, between in other
-        i_new_between = []   # edges between in new clustering, internal in other
-        new_score = ct.cid_list_score(G, cc.new_clustering, new_n2c,
-                                      list(cc.new_clustering.keys()))
-        logger.info("New score %d, new clustering %a"
-                    % (new_score, cc.new_clustering))
-        other_score = ct.cid_list_score(G,
-                                        cc.old_clustering,
-                                        other_n2c,
-                                        list(cc.old_clustering.keys()))
-        logger.info("Other score %d, other clustering %a"
-                    % (other_score, cc.old_clustering))
+        i_new_between = []  # edges between in new clustering, internal in other
+        new_score = ct.cid_list_score(
+            G, cc.new_clustering, new_n2c, list(cc.new_clustering.keys())
+        )
+        logger.info('New score %d, new clustering %a' % (new_score, cc.new_clustering))
+        other_score = ct.cid_list_score(
+            G, cc.old_clustering, other_n2c, list(cc.old_clustering.keys())
+        )
+        logger.info(
+            'Other score %d, other clustering %a' % (other_score, cc.old_clustering)
+        )
 
         cc_nodes = sorted(set.union(*cc.new_clustering.values()))
         for i, ni in enumerate(cc_nodes):
             for j in range(i + 1, len(cc_nodes)):
                 nj = cc_nodes[j]
-                if nj not in G[ni]:   # no edge
+                if nj not in G[ni]:  # no edge
                     continue
-                
+
                 e = (ni, nj, G[ni][nj]['weight'])
                 same_in_new = new_n2c[ni] == new_n2c[nj]
                 same_in_other = other_n2c[ni] == other_n2c[nj]
@@ -263,14 +268,14 @@ def compare_to_other_clustering(new_cl, new_n2c, other_cl, G):
                     i_new_internal.append(e)
                 else:
                     i_new_between.append(e)
-        write_changes_to_log("Edges internal to a cluster in both",
-                             c_internal)
-        write_changes_to_log("Edges between clusters in both",
-                             c_between)
-        write_changes_to_log("Edges internal in new clustering, between in other",
-                             i_new_internal)
-        write_changes_to_log("Edges between in new clustering, internal in other",
-                             i_new_between)
+        write_changes_to_log('Edges internal to a cluster in both', c_internal)
+        write_changes_to_log('Edges between clusters in both', c_between)
+        write_changes_to_log(
+            'Edges internal in new clustering, between in other', i_new_internal
+        )
+        write_changes_to_log(
+            'Edges between in new clustering, internal in other', i_new_between
+        )
 
 
 # ==============================
@@ -412,19 +417,24 @@ def test_compare_to_other_clustering():
             ('h', 'i', 6),
             ('i', 'j', -4),
             ('j', 'k', 5),
-        ])
+        ]
+    )
 
-    new_cl = {'0': set(['a', 'b', 'd', 'e']),
-              '1': set(['c']),
-              '2': set(['h', 'i']),
-              '3': set(['f', 'g', 'j', 'k'])}
+    new_cl = {
+        '0': set(['a', 'b', 'd', 'e']),
+        '1': set(['c']),
+        '2': set(['h', 'i']),
+        '3': set(['f', 'g', 'j', 'k']),
+    }
     new_n2c = ct.build_node_to_cluster_mapping(new_cl)
-    other_cl = {'5': set(['a', 'b', 'd', 'h']),
-                '6': set(['f', 'g', 'k']),
-                '7': set(['j']),
-                '8': set(['c']),
-                '9': set(['e', 'i']),
-                '10': set(['m', 'n'])}
+    other_cl = {
+        '5': set(['a', 'b', 'd', 'h']),
+        '6': set(['f', 'g', 'k']),
+        '7': set(['j']),
+        '8': set(['c']),
+        '9': set(['e', 'i']),
+        '10': set(['m', 'n']),
+    }
     compare_to_other_clustering(new_cl, new_n2c, other_cl, G)
 
 

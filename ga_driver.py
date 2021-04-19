@@ -335,8 +335,12 @@ class ga_driver(object):  # NOQA
             logger.info('    %d edges involving %d current clusters' % (len(e), len(c)))
 
     def run_ga_on_ccPIC(
-        self, ccPIC_edges, ccPIC_clustering, yield_on_paused=False, progress_cb=None
-            other_clustering=None  #  JP: look here!!!
+        self,
+        ccPIC_edges,
+        ccPIC_clustering,
+        yield_on_paused=False,
+        progress_cb=None,
+        other_clustering=None,
     ):
         gai = ga.graph_algorithm(
             ccPIC_edges,
@@ -397,33 +401,18 @@ class ga_driver(object):  # NOQA
             logger.info('Change %d' % i)
             cc.log_change()
 
-        """
-        JP: LOOK HERE
-        You need to pass in a clustering built from the old graph
-        algorithm.  Call it "other_clustering:.  It must be a
-        dictionary mapping cluster ids to sets of node ids.  It is
-        possible that the nodes together can be a superset of the
-        nodes in the ccPIC --- for example if the ccPIC does not
-        include all the nodes.
+        if other_clustering is not None:
+            compare_clusterings.compare_to_other_clustering(
+                gai.clustering, gai.node2cid, other_clustering, gai.G
+            )
 
-        The call is simply
-        """
-        compare_to_other_clustering(gai.clustering, gai.node2cid,
-                                    other_clustering, gai.G)
-
-            
         logger.info('')
         yield changes
 
-    def run_all_ccPICs(self, yield_on_paused=False, progress_cb=None):
+    def run_all_ccPICs(self, **kwargs):
         changes_to_review = []
         for edges, clustering in self.ccPICs:
-            ga_gen = self.run_ga_on_ccPIC(
-                edges,
-                clustering,
-                yield_on_paused=yield_on_paused,
-                progress_cb=progress_cb,
-            )
+            ga_gen = self.run_ga_on_ccPIC(edges, clustering, **kwargs)
 
             while True:
                 try:
