@@ -875,7 +875,7 @@ class LCAActor(GraphActor):
             'autoreview.enabled': False,
             'inference.enabled': True,
             'ranking.enabled': True,
-            'ranking.ntop': 20,
+            'ranking.ntop': 50,
             'redun.enabled': False,
             'algo.hardcase': False,
         }
@@ -914,7 +914,7 @@ class LCAActor(GraphActor):
         actor.config = {
             'warmup.n_peek': 50,
             'weighter_required_reviews': 50,
-            'weighter_recent_reviews': 500,
+            'weighter_recent_reviews': 1000,
             'init_nids': [],
             'autoreview.enabled': USE_AUTOREVIEW,
             'autoreview.prob_human_correct': prob_human_correct,
