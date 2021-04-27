@@ -1076,7 +1076,7 @@ class LCAActor(GraphActor):
                 max_probs = mean_probs + (std_probs * 2.0)
                 logger.info(
                     'Discarding outlies in %d review edges with [%0.02f <- %0.02f +/- %0.02f -> %0.02f]'
-                    * (
+                    % (
                         len(probs),
                         min_probs,
                         mean_probs,
