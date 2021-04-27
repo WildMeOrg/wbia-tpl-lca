@@ -1067,6 +1067,17 @@ class LCAActor(GraphActor):
                 random.shuffle(edges)
                 edges = edges[thresh_edges:]
                 probs, _, _ = actor._candidate_edge_probs(edges)
+
+                # Filter out outliers
+                probs = np.array(probs)
+                mean_probs = np.mean(probs)
+                std_probs = np.std(probs)
+                min_probs = mean_probs - (std_probs * 2.0)
+                max_probs = mean_probs + (std_probs * 2.0)
+                probs = [
+                    prob for prob in probs if min_probs <= prob and prob <= max_probs
+                ]
+
                 verifier_gt[algo][key] = probs
 
         logger.info(ut.repr3(verifier_gt))
