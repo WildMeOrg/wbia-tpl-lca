@@ -1074,9 +1074,20 @@ class LCAActor(GraphActor):
                 std_probs = np.std(probs)
                 min_probs = mean_probs - (std_probs * 2.0)
                 max_probs = mean_probs + (std_probs * 2.0)
+                logger.info(
+                    'Discarding outlies in %d review edges with [%0.02f <- %0.02f +/- %0.02f -> %0.02f]'
+                    * (
+                        len(probs),
+                        min_probs,
+                        mean_probs,
+                        std_probs,
+                        max_probs,
+                    )
+                )
                 probs = [
                     prob for prob in probs if min_probs <= prob and prob <= max_probs
                 ]
+                logger.info('Keeping %d review edges' % (len(probs),))
 
                 verifier_gt[algo][key] = probs
 
