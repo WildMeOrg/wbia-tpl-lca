@@ -875,7 +875,7 @@ class LCAActor(GraphActor):
             'autoreview.enabled': False,
             'inference.enabled': True,
             'ranking.enabled': True,
-            'ranking.ntop': 50,
+            'ranking.ntop': 20,
             'redun.enabled': False,
             'algo.hardcase': False,
         }
@@ -1210,6 +1210,14 @@ class LCAActor(GraphActor):
             desired_states = [POSTV, NEGTV, INCMP, UNKWN, UNREV]
             desired_states = [desired_states] + desired_states
 
+        # Reset ranker_params to empty
+        old_ranker_params = actor.infr.ranker_params
+        actor.infr.ranker_params = {}
+
+        import utool as ut
+
+        ut.embed()
+
         # Run LNBNN to find matches
         candidate_edges = []
         for desired_state in desired_states:
@@ -1217,14 +1225,29 @@ class LCAActor(GraphActor):
                 desired_states_ = desired_state
             else:
                 desired_states_ = [desired_state]
-            candidate_edges += actor.infr.find_lnbnn_candidate_edges(
-                desired_states=desired_states_,
-                can_match_samename=True,
-            )
-            candidate_edges += actor.infr.find_lnbnn_candidate_edges(
-                desired_states=desired_states_,
-                can_match_samename=False,
-            )
+
+            for K in [3, 5, 7, 10, 20]:
+                for Knorm in [3, 5, 7, 10]:
+                    for score_method in ['csum', 'nsum']:
+                        candidate_edges += actor.infr.find_lnbnn_candidate_edges(
+                            desired_states=desired_states_,
+                            can_match_samename=True,
+                            K=K,
+                            Knorm=Knorm,
+                            prescore_method=score_method,
+                            score_method=score_method,
+                        )
+                        candidate_edges += actor.infr.find_lnbnn_candidate_edges(
+                            desired_states=desired_states_,
+                            can_match_samename=False,
+                            K=K,
+                            Knorm=Knorm,
+                            prescore_method=score_method,
+                            score_method=score_method,
+                        )
+
+        # Reset ranker_params to default
+        actor.infr.ranker_params = old_ranker_params
 
         candidate_edges = list(set(candidate_edges))
         logger.info('Edges from LNBNN ranking %d' % (len(candidate_edges),))
