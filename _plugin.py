@@ -875,7 +875,7 @@ class LCAActor(GraphActor):
             'autoreview.enabled': False,
             'inference.enabled': True,
             'ranking.enabled': True,
-            'ranking.ntop': 20,
+            'ranking.ntop': 10,
             'redun.enabled': False,
             'algo.hardcase': False,
         }
@@ -1229,27 +1229,18 @@ class LCAActor(GraphActor):
 
     def _refresh_data(actor, warmup=False, desired_states=None):
         if desired_states is None:
-            desired_states = [POSTV, NEGTV, INCMP, UNKWN, UNREV]
-            desired_states = [desired_states] + desired_states
+            desired_states = [[POSTV, NEGTV, INCMP, UNKWN, UNREV]]
+            # desired_states = [desired_states] + desired_states
 
         # Reset ranker_params to empty
         old_ranker_params = actor.infr.ranker_params
         actor.infr.ranker_params = {}
 
-        import utool as ut
-
-        ut.embed()
-
         # Run LNBNN to find matches
         candidate_edges = []
-        for desired_state in desired_states:
-            if isinstance(desired_state, list):
-                desired_states_ = desired_state
-            else:
-                desired_states_ = [desired_state]
-
-            for K in [3, 5, 7, 10, 20]:
-                for Knorm in [3, 5, 7, 10]:
+        for desired_states_ in desired_states:
+            for K in [3, 5, 7]:
+                for Knorm in [3, 5, 7]:
                     for score_method in ['csum', 'nsum']:
                         candidate_edges += actor.infr.find_lnbnn_candidate_edges(
                             desired_states=desired_states_,
@@ -1439,7 +1430,7 @@ class LCAActor(GraphActor):
             logger.info('WARMUP: Computing warmup data')
 
             # We are still in warm-up, need to ask user for reviews
-            warmup_data = actor._refresh_data(warmup=True, desired_states=[UNREV])
+            warmup_data = actor._refresh_data(warmup=True, desired_states=[[UNREV]])
             candidate_edges, candidate_probs = warmup_data
             candidate_probs_ = list(map(int, np.around(np.array(candidate_probs) * 10.0)))
 
