@@ -1239,9 +1239,9 @@ class LCAActor(GraphActor):
         # Run LNBNN to find matches
         candidate_edges = []
         for desired_states_ in desired_states:
-            for K in [3, 5, 7]:
-                for Knorm in [3, 5, 7]:
-                    for score_method in ['csum', 'nsum']:
+            for K in [5]:  # [3, 5, 7]:
+                for Knorm in [5]:  # [3, 5, 7]:
+                    for score_method in ['csum']:  # #['csum', 'nsum']:
                         candidate_edges += actor.infr.find_lnbnn_candidate_edges(
                             desired_states=desired_states_,
                             can_match_samename=True,
@@ -1249,6 +1249,7 @@ class LCAActor(GraphActor):
                             Knorm=Knorm,
                             prescore_method=score_method,
                             score_method=score_method,
+                            requery=False,
                         )
                         candidate_edges += actor.infr.find_lnbnn_candidate_edges(
                             desired_states=desired_states_,
@@ -1257,6 +1258,7 @@ class LCAActor(GraphActor):
                             Knorm=Knorm,
                             prescore_method=score_method,
                             score_method=score_method,
+                            requery=False,
                         )
 
         # Reset ranker_params to default
