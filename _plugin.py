@@ -535,23 +535,41 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
 
         super(db_interface_wbia, self).__init__(edges, clustering)
 
-    def _get_existing_clustering(self):
-        clustering_labels = list(self.infr.pos_graph.component_labels())
-        clustering_components = list(self.infr.pos_graph.connected_components())
-        assert len(clustering_labels) == len(clustering_components)
-
+    def _get_existing_clustering(self, use_ibeis_database=False):
         clustering = {}
-        for clustering_label, clustering_component in zip(
-            clustering_labels, clustering_components
-        ):
-            clustering_label_ = convert_wbia_name_id_to_lca_cluster_id(clustering_label)
-            clustering_component = list(
-                map(convert_wbia_annot_id_to_lca_node_id, clustering_component)
-            )
-            clustering[clustering_label_] = clustering_component
 
-        args = (len(clustering),)
-        logger.info('Retrieving clustering with %d names' % args)
+        if use_ibeis_database:
+            src_str = 'INFR POS_GRAPH'
+            clustering_labels = list(self.infr.pos_graph.component_labels())
+            clustering_components = list(self.infr.pos_graph.connected_components())
+            assert len(clustering_labels) == len(clustering_components)
+
+            for clustering_label, clustering_component in zip(
+                clustering_labels, clustering_components
+            ):
+                clustering_label_ = convert_wbia_name_id_to_lca_cluster_id(
+                    clustering_label
+                )
+                clustering_component = list(
+                    map(convert_wbia_annot_id_to_lca_node_id, clustering_component)
+                )
+                clustering[clustering_label_] = clustering_component
+        else:
+            src_str = 'IBEIS DB'
+            aids = self.infr.aids
+            nids = self.ibs.get_annot_nids(aids)
+            for aid, nid in zip(aids, nids):
+                cluster_label_ = convert_wbia_name_id_to_lca_cluster_id(nid)
+                cluster_node_ = convert_wbia_annot_id_to_lca_node_id(aid)
+                if cluster_label_ not in clustering:
+                    clustering[cluster_label_] = []
+                clustering[cluster_label_].append(cluster_node_)
+
+        args = (
+            len(clustering),
+            src_str,
+        )
+        logger.info('Retrieving clustering with %d names (source: %s)' % args)
 
         for nid in sorted(clustering.keys()):
             clustering[nid] = sorted(clustering[nid])
@@ -874,12 +892,27 @@ class LCAActor(GraphActor):
             # 'redun.pos': 2,
             # 'algo.hardcase': False,
 
-            'autoreview.enabled': False,
+            'autoreview.enabled': True,
+            'autoreview.prioritize_nonpos': True,
             'inference.enabled': True,
             'ranking.enabled': True,
             'ranking.ntop': 10,
-            'redun.enabled': False,
-            'algo.hardcase': False,
+            'redun.enabled': True,
+            'redun.enforce_neg': True,
+            'redun.enforce_pos': True,
+            'redun.neg.only_auto': False,
+            'redun.neg': 2,
+            'redun.pos': 2,
+            'refresh.window': 20,
+            'refresh.patience': 20,
+            'refresh.thresh': np.exp(-2),
+
+            # 'autoreview.enabled': False,
+            # 'inference.enabled': True,
+            # 'ranking.enabled': True,
+            # 'ranking.ntop': 10,
+            # 'redun.enabled': False,
+            # 'algo.hardcase': False,
         }
 
         actor.lca_config = {
@@ -951,8 +984,9 @@ class LCAActor(GraphActor):
 
         # Pull reviews from staging
         actor.infr.print('Initializing infr tables')
-        table = kwargs.get('init', 'staging')
-        actor.infr.reset_feedback(table, apply=True)
+        if not USE_COLDSTART:
+            table = kwargs.get('init', 'staging')
+            actor.infr.reset_feedback(table, apply=True)
         actor.infr.ensure_mst()
         actor.infr.apply_nondynamic_update()
 
@@ -961,6 +995,9 @@ class LCAActor(GraphActor):
         # Load VAMP models
         actor.infr.print('loading published models')
         actor.infr.load_published()
+
+        if USE_COLDSTART:
+            actor.infr.reset(state='empty')
 
         assert actor.infr is not None
 
@@ -1066,6 +1103,7 @@ class LCAActor(GraphActor):
                     return False
 
                 thresh_edges = -1 * min(num_edges, max_edges)
+                random.seed(1)
                 random.shuffle(edges)
                 edges = edges[thresh_edges:]
                 probs, _, _ = actor._candidate_edge_probs(edges)
@@ -1239,29 +1277,32 @@ class LCAActor(GraphActor):
         actor.infr.ranker_params = {}
 
         # Run LNBNN to find matches
-        candidate_edges = []
-        for desired_states_ in desired_states:
-            for K in [5]:  # [3, 5, 7]:
-                for Knorm in [5]:  # [3, 5, 7]:
-                    for score_method in ['csum']:  # #['csum', 'nsum']:
-                        # candidate_edges += actor.infr.find_lnbnn_candidate_edges(
-                        #     desired_states=desired_states_,
-                        #     can_match_samename=True,
-                        #     K=K,
-                        #     Knorm=Knorm,
-                        #     prescore_method=score_method,
-                        #     score_method=score_method,
-                        #     requery=False,
-                        # )
-                        candidate_edges += actor.infr.find_lnbnn_candidate_edges(
-                            desired_states=desired_states_,
-                            can_match_samename=False,
-                            K=K,
-                            Knorm=Knorm,
-                            prescore_method=score_method,
-                            score_method=score_method,
-                            requery=False,
-                        )
+        if USE_COLDSTART:
+            candidate_edges = actor.infr.find_lnbnn_candidate_edges()
+        else:
+            candidate_edges = []
+            for desired_states_ in desired_states:
+                for K in [5]:  # [3, 5, 7]:
+                    for Knorm in [5]:  # [3, 5, 7]:
+                        for score_method in ['csum']:  # #['csum', 'nsum']:
+                            candidate_edges += actor.infr.find_lnbnn_candidate_edges(
+                                desired_states=desired_states_,
+                                can_match_samename=True,
+                                K=K,
+                                Knorm=Knorm,
+                                prescore_method=score_method,
+                                score_method=score_method,
+                                requery=False,
+                            )
+                            candidate_edges += actor.infr.find_lnbnn_candidate_edges(
+                                desired_states=desired_states_,
+                                can_match_samename=False,
+                                K=K,
+                                Knorm=Knorm,
+                                prescore_method=score_method,
+                                score_method=score_method,
+                                requery=False,
+                            )
 
         # Reset ranker_params to default
         actor.infr.ranker_params = old_ranker_params
@@ -1469,7 +1510,9 @@ class LCAActor(GraphActor):
             actor._init_lca()
 
         # Get existing clustering of names before processing has started
-        other_clustering = actor.db._get_existing_clustering()
+        other_clustering = actor.db._get_existing_clustering(
+            use_ibeis_database=USE_COLDSTART
+        )
 
         actor.phase = 1
         actor.loop_phase = 'driver'
