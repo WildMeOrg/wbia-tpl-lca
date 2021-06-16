@@ -539,6 +539,16 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
         clustering = {}
 
         if use_ibeis_database:
+            src_str = 'IBEIS DB'
+            aids = self.infr.aids
+            nids = self.ibs.get_annot_nids(aids)
+            for aid, nid in zip(aids, nids):
+                cluster_label_ = convert_wbia_name_id_to_lca_cluster_id(nid)
+                cluster_node_ = convert_wbia_annot_id_to_lca_node_id(aid)
+                if cluster_label_ not in clustering:
+                    clustering[cluster_label_] = []
+                clustering[cluster_label_].append(cluster_node_)
+        else:
             src_str = 'INFR POS_GRAPH'
             clustering_labels = list(self.infr.pos_graph.component_labels())
             clustering_components = list(self.infr.pos_graph.connected_components())
@@ -554,16 +564,6 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
                     map(convert_wbia_annot_id_to_lca_node_id, clustering_component)
                 )
                 clustering[clustering_label_] = clustering_component
-        else:
-            src_str = 'IBEIS DB'
-            aids = self.infr.aids
-            nids = self.ibs.get_annot_nids(aids)
-            for aid, nid in zip(aids, nids):
-                cluster_label_ = convert_wbia_name_id_to_lca_cluster_id(nid)
-                cluster_node_ = convert_wbia_annot_id_to_lca_node_id(aid)
-                if cluster_label_ not in clustering:
-                    clustering[cluster_label_] = []
-                clustering[cluster_label_].append(cluster_node_)
 
         args = (
             len(clustering),
