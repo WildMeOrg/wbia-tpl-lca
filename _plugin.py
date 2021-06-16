@@ -43,6 +43,8 @@ ALGO_AUG_NAME = 'vamp'
 ALGO_IDENTITY = 'algo:vamp'
 ALGO_IDENTITY_PREFIX = '%s:' % (ALGO_IDENTITY.split(':')[0],)
 
+# HUMAN_CORRECT_RATE = 0.97
+HUMAN_CORRECT_RATE = 1.0
 
 USE_COLDSTART = ut.get_argflag('--lca-coldstart')
 USE_AUTOREVIEW = ut.get_argflag('--lca-autoreview') or USE_COLDSTART
@@ -885,7 +887,7 @@ class LCAActor(GraphActor):
                 ALGO_AUG_NAME,
                 HUMAN_AUG_NAME,
             ],
-            'prob_human_correct': 0.97,
+            'prob_human_correct': HUMAN_CORRECT_RATE,
 
             # DEFAULT
             # 'min_delta_converge_multiplier': 0.95,
@@ -910,7 +912,7 @@ class LCAActor(GraphActor):
             'drawing_prefix': 'wbia_lca',
         }
 
-        prob_human_correct = actor.lca_config.get('prob_human_correct', 0.97)
+        prob_human_correct = actor.lca_config.get('prob_human_correct', HUMAN_CORRECT_RATE)
         actor.config = {
             'warmup.n_peek': 50,
             'weighter_required_reviews': 50,
@@ -1242,15 +1244,15 @@ class LCAActor(GraphActor):
             for K in [5]:  # [3, 5, 7]:
                 for Knorm in [5]:  # [3, 5, 7]:
                     for score_method in ['csum']:  # #['csum', 'nsum']:
-                        candidate_edges += actor.infr.find_lnbnn_candidate_edges(
-                            desired_states=desired_states_,
-                            can_match_samename=True,
-                            K=K,
-                            Knorm=Knorm,
-                            prescore_method=score_method,
-                            score_method=score_method,
-                            requery=False,
-                        )
+                        # candidate_edges += actor.infr.find_lnbnn_candidate_edges(
+                        #     desired_states=desired_states_,
+                        #     can_match_samename=True,
+                        #     K=K,
+                        #     Knorm=Knorm,
+                        #     prescore_method=score_method,
+                        #     score_method=score_method,
+                        #     requery=False,
+                        # )
                         candidate_edges += actor.infr.find_lnbnn_candidate_edges(
                             desired_states=desired_states_,
                             can_match_samename=False,
