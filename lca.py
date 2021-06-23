@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
+import math
+import random as rnd
 import networkx as nx
 
 from wbia_lca import cluster_tools as ct
@@ -149,6 +151,26 @@ class LCA(object):
         # Finally, return the score changes
         return (from_score_change, to_score_change)
 
+    
+    def densify_singleton(self, params):
+        if len(self.from_cids_sorted) != 1:
+            return []
+        nodes = sorted(self.nodes())
+        missing_edges = []
+        for i, m in enumerate(nodes):
+            for j in range(i + 1, len(nodes)):
+                n = nodes[j]
+                if n not in self.subgraph[m]:
+                    missing_edges.append([m, n])
+
+        num_to_add = max(params['num_per_augmentation'],
+                         math.ceil(params['densify_frac'] * len(missing_edges)))
+        if num_to_add < len(missing_edges):
+            missing_edges = missing_edges[:num_to_add]
+            rnd.shuffle(missing_edges)
+        return missing_edges
+
+
     def pprint_short(self, initial_str='', stop_after_from=False):
         out_str = initial_str + 'From cids:'
         for cid in sorted(self.from_clusters.keys()):
@@ -295,16 +317,16 @@ def test_LCA_class():
     prs = a.get_inconsistent(n, futile_tester_default)
     logger.info(prs)
     logger.info(
-        'At this point, the inconsistent list should be length 6. It is',
-        len(a.inconsistent),
+        'At this point, the inconsistent list should be length 6. It is %a'
+        % len(a.inconsistent),
     )
     logger.info(
-        'The first pair on the inconsistent list should be (f, i) and is',
-        a.inconsistent[0],
+        "The first pair on the inconsistent list should be (f, i) and is" +
+        str(a.inconsistent[0]),
     )
     logger.info(
-        'The last pair on the inconsistent list should be (f, g) and is',
-        a.inconsistent[-1],
+        'The last pair on the inconsistent list should be (f, g) and is' +
+        str(a.inconsistent[-1]),
     )
 
 
@@ -452,12 +474,51 @@ def test_futility_check():
     logger.info('***********\nTesting get_inconsistent with futility check on edges.')
     logger.info(
         'For simple three-node graph the non-futile, inconsistent pairs\n'
-        "should be just [('b', 'c')] and is: ",
-        prs,
+        "should be just [('b', 'c')] and is: %a "
+        % prs,
     )
+
+
+def test_densify_singleton():
+    G = nx.Graph()
+    G.add_weighted_edges_from(
+        [
+            ('a', 'b', 3),
+            ('a', 'c', -2),
+            ('a', 'd', 4),
+            ('b', 'e', 5),
+            ('c', 'e', -1),
+            ('c', 'f', 8),
+            ('d', 'f', 6)
+        ]
+    )
+    clustering = {0: set(['a', 'b', 'c', 'd', 'e', 'f'])}
+    n2c = ct.build_node_to_cluster_mapping(clustering)
+    cids = list(clustering.keys())
+    score = ct.clustering_score(G, n2c)
+    a = LCA(G, clustering, cids, score)
+    params = {"num_per_augmentation": 2,
+              "densify_frac": 1}
+    to_add = a.densify_singleton(params)
+    logger.info("test densify, adding all. should be length 8 and is: %d" % len(to_add))
+
+    params["densify_frac"] = 0.33
+    to_add = a.densify_singleton(params)
+    logger.info("test densify, adding 0.3 should produce length 3 and is: %d" % len(to_add))
+    s = str(to_add)
+    logger.info("test densify, here are the added edges: " + s)
+
+    params["densify_frac"] = 0.33
+    params["num_per_augmentation"] = 4
+    to_add = a.densify_singleton(params)
+    logger.info("test densify, adding with num_per_augmentation = 4 should "
+                "produce length 3 and is: %d" % len(to_add))
+    s = str(to_add)
+    logger.info("test densify, here are the added edges: " + s)
 
 
 if __name__ == '__main__':
     test_LCA_class()
     test_LCA_add_edge_method()
     test_futility_check()
+    test_densify_singleton()
