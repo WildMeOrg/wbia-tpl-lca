@@ -215,6 +215,9 @@ class graph_algorithm(object):  # NOQA
         self.num_human_results = 0
         self.removed_nodes = set()
 
+        self.should_run_densify = "should_densify" in self.params \
+            and self.params["should_densify"]
+
         self.draw_obj = None
         if self.params['draw_iterations']:
             self.draw_obj = draw_lca.draw_lca(self.params['drawing_prefix'])
@@ -426,29 +429,37 @@ class graph_algorithm(object):  # NOQA
                     self.params['num_per_augmentation'], self.weight_mgr.futile_tester
                 )
                 if len(prs) == 0:
-                    logger.info("LCA marked as 'futile'. Moved to done list.")
-                    self.queues.add_to_done(a)
+                    logger.info("LCA marked as 'futile'. Moved to futile list.")
+                    self.queues.add_to_futile(a)
                 else:
                     self.weight_mgr.request_new_weights(prs)
                     self.queues.add_to_W(a)
 
-            # Step 2e: at this point the only remaining active LCAs are
-            # waiting for edges, so need to pause.
-            elif (
-                a is None or self.params['min_delta_score_converge'] >= a.delta_score()
-            ) and self.queues.num_on_W() > 0:
+            # Step 2e: at this point the only remaining active LCAs
+            # are waiting for edges, so need to pause.
+            elif self.queues.num_on_W() > 0:
                 should_pause = True
                 logger.info(
                     'Decision: top LCA delta is too low, but non-empty'
                     '  waiting queue, so need to pause'
                 )
 
-            # Step 2f: At this point, all active LCAs are waiting, and
+            # Step 2f: at this point, there are no active LCAs and no
+            # LCAs are waiting for edges. The last possibility is to
+            # densify the singleton LCAs. This is done at most once.
+            elif self.should_run_densify:
+                logger.info(
+                    "Decision: top LCA delta is too low and empty waiting queue;"
+                    " will densify singletons")
+                self.densify_singletons()
+                self.should_run_densify = False
+            
+            # Step 2g: At this point, all active LCAs are waiting, and
             # if there are none then the algorithm has converged!
             else:
                 assert self.queues.num_on_W() == 0
                 logger.info(
-                    'Decision: all deltas too low and empty waiting' ' queue W, so done'
+                    'Decision: all deltas too low and empty waiting queue, so done'
                 )
                 converged = True
 
@@ -653,6 +664,26 @@ class graph_algorithm(object):  # NOQA
             # Form the LCAs
             use_pairs, use_singles = self.which_lca_types()
             self.new_lcas(new_cids, use_pairs, use_singles)
+
+    def densify_singletons(self):
+        """
+        Densify singleton LCAs, keeping a list of edges to add and
+        placing LCAs adding at least one edge onto the waiting list.
+        because they will wait for new edges to be weighted.
+        All other LCAs are eliminated (though not the actual clusters,
+        of course).  After this, the priority queue and scoring queuue
+        should both be empty.
+        """
+        prs_to_add = []
+        lcas = self.queues.Q.get_all()
+        for a in lcas:
+            to_add = a.densify_singleton(self.params)
+            if len(to_add) > 0:
+                self.queues.add_to_W(a)
+                prs_to_add.extend(to_add)
+        if len(prs_to_add) > 0:
+            self.weight_mgr.request_new_weights(prs_to_add)
+        self.queues.Q.clear()
 
     def status_check(self):
         active_scores = []
