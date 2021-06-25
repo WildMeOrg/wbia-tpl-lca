@@ -12,7 +12,9 @@ and one set:
 
 . the queue, W, of LCAs waiting for an augmentation edge result
 
-. the done set of LCAs no longer under consideration
+. the futile set of LCAs no longer under consideration -- where no
+addition of edges could change the clustering decision for the
+subgraph covered by the LCA.
 
 All current LCAs must be in exactly one of the queues / sets at the
 start of each outer loop of the LCA algorithm.
@@ -30,7 +32,7 @@ class lca_queues(object):  # NOQA
     def __init__(self, lcas=None):
         """
         The initializer, putting all LCAs on the scoring queue and
-        making S, W and done all empty.
+        making S, W and futile all empty.
         """
         self.Q = lh.lca_heap()
         if lcas is None:
@@ -38,10 +40,10 @@ class lca_queues(object):  # NOQA
         else:
             self.S = set(lcas)
         self.W = set()
-        self.done = set()
+        self.futile = set()
 
     def num_lcas(self):
-        return len(self.Q) + len(self.S) + len(self.W) + len(self.done)
+        return len(self.Q) + len(self.S) + len(self.W) + len(self.futile)
 
     def top_Q(self):
         """
@@ -101,11 +103,11 @@ class lca_queues(object):  # NOQA
         """
         return len(self.W)
 
-    def add_to_done(self, a):
+    def add_to_futile(self, a):
         """
-        Mark an LCA as done -- sufficiently stable.
+        Mark an LCA as futile --- all possibilities reasonably explored
         """
-        self.done.add(a)
+        self.futile.add(a)
 
     def remove(self, lcas):
         """
@@ -118,8 +120,8 @@ class lca_queues(object):  # NOQA
                 self.W.remove(a)
             elif a in self.S:
                 self.S.remove(a)
-            elif a in self.done:
-                self.done.remove(a)
+            elif a in self.futile:
+                self.futile.remove(a)
             else:
                 self.Q.remove(a)
 
@@ -164,7 +166,7 @@ class lca_queues(object):  # NOQA
         """
         Return a single character string indicating the queue that LCA
         a is on.  Choices are 'S' (scoring), 'W' (waiting - for
-        augmentation), 'Q' (main queue) or 'D' (done).  If the LCA is
+        augmentation), 'Q' (main queue) or 'F' (futile).  If the LCA is
         not on any of the queues, None is returned.
         """
         if a in self.S:
@@ -173,8 +175,8 @@ class lca_queues(object):  # NOQA
             return 'W'
         elif a in self.Q.heap:
             return 'Q'
-        elif a in self.done:
-            return 'D'
+        elif a in self.futile:
+            return 'F'
         else:
             return None
 
@@ -197,9 +199,9 @@ class lca_queues(object):  # NOQA
             logger.info('LCA queues, Q and W intersect')
             all_ok = False
 
-        qd = q_set & self.done
+        qd = q_set & self.futile
         if len(qd) > 0:
-            logger.info('LCA queues, Q and done queue intersect')
+            logger.info('LCA queues, Q and futile queue intersect')
             all_ok = False
 
         sw = self.S & self.W
@@ -207,22 +209,22 @@ class lca_queues(object):  # NOQA
             logger.info('LCA queues, S and W intersect')
             all_ok = False
 
-        sd = self.S & self.done
+        sd = self.S & self.futile
         if len(sd) > 0:
-            logger.info('LCA queues, S and done queue intersect')
+            logger.info('LCA queues, S and futile intersect')
             all_ok = False
 
-        wd = self.W & self.done
+        wd = self.W & self.futilene
         if len(wd) > 0:
-            logger.info('LCA queues, W and done queue intersect')
+            logger.info('LCA queues, W and futile queue intersect')
             all_ok = False
 
         return all_ok
 
     def log(self):
         logger.info(
-            'Number of LCAs on Q %d, W %d, S %d, done %d'
-            % (len(self.Q), len(self.W), len(self.S), len(self.done))
+            'Number of LCAs on Q %d, W %d, S %d, futile %d'
+            % (len(self.Q), len(self.W), len(self.S), len(self.futile))
         )
 
     def info_long(self, max_entries=-1):
@@ -276,7 +278,7 @@ def test_lca_queues():
     logger.info(
         'After initialization: lengths should be (0, %d, 0, 0)'
         ' and are (%d, %d, %d, %d)'
-        % (len(v), len(queues.Q), len(queues.S), len(queues.W), len(queues.done))
+        % (len(v), len(queues.Q), len(queues.S), len(queues.W), len(queues.futile))
     )
     queues.get_S()
     queues.clear_S()
@@ -358,27 +360,27 @@ def test_lca_queues():
     logger.info(
         'After initialization (again): lengths should be (0, %d, 0, 0)'
         ' and are (%d, %d, %d, %d)'
-        % (len(v), len(queues.Q), len(queues.S), len(queues.W), len(queues.done))
+        % (len(v), len(queues.Q), len(queues.S), len(queues.W), len(queues.futile))
     )
     queues.clear_S()
     queues.add_to_Q(v[0])
-    queues.add_to_done(v[1])
-    queues.add_to_done(v[2])
-    queues.add_to_done(v[3])
+    queues.add_to_futile(v[1])
+    queues.add_to_futile(v[2])
+    queues.add_to_futile(v[3])
     logger.info(
         'After moving around: lengths should be (1, 0, 0, 3)'
         ' and are (%d, %d, %d, %d)'
-        % (len(queues.Q), len(queues.S), len(queues.W), len(queues.done))
+        % (len(queues.Q), len(queues.S), len(queues.W), len(queues.futile))
     )
     queues.remove(v[3])
     queues.score_change(v[2], from_delta=0, to_delta=-4)
     logger.info('Which queue: should be Q and is %s' % (queues.which_queue(v[0]),))
-    logger.info('Which queue: should be D and is %s' % (queues.which_queue(v[1]),))
+    logger.info('Which queue: should be F and is %s' % (queues.which_queue(v[1]),))
     logger.info('Which queue: should be S and is %s' % (queues.which_queue(v[2]),))
     logger.info(
         'At end: lengths should be (1, 1, 0, 1)'
         ' and are (%d, %d, %d, %d)'
-        % (len(queues.Q), len(queues.S), len(queues.W), len(queues.done))
+        % (len(queues.Q), len(queues.S), len(queues.W), len(queues.futile))
     )
 
 
