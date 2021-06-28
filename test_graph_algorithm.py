@@ -31,6 +31,10 @@ def default_params():
     p['min_delta_score_stability'] = (
         p['min_delta_score_converge'] / p['min_delta_stability_ratio']
     )
+    p['should_densify'] = False
+    max_for_complete = 4
+    p['densify_min_edges'] = max_for_complete * (max_for_complete - 1) // 2
+    p['densify_frac'] = 0.5
 
     return p
 
@@ -680,6 +684,48 @@ class test_generator(object):  # NOQA
                 'phase': 'stability',
             }
 
+        elif which_graph == 16:
+            self.msg = "Testing densification"
+            self.initial_edges = [
+                ('a', 'b', 10, 'vamp'),
+                ('a', 'c', -1, 'vamp'),
+                ('c', 'd',  9, 'vamp'),
+                ('c', 'e', 11, 'vamp'),
+                ('e', 'f', 12, 'vamp'),
+            ]
+            self.aug_available = {
+                ('a', 'd', 'vamp'): 1,
+                ('a', 'e', 'vamp'): -10,
+                ('a', 'f', 'vamp'): -12,
+                ('b', 'c', 'vamp'): 2,
+                ('b', 'd', 'vamp'): 1,
+                ('b', 'e', 'vamp'): -10,
+                ('b', 'f', 'vamp'): -13,
+                ('c', 'f', 'vamp'): -12,
+                ('d', 'e', 'vamp'): -6,
+                ('d', 'f', 'vamp'): -8,
+                ('a', 'b', 'human'): 10,
+                ('a', 'c', 'human'): 9,
+                ('a', 'd', 'human'): 11,
+                ('a', 'e', 'human'): 11,
+                ('a', 'f', 'human'): -9,
+                ('b', 'c', 'human'): 12,
+                ('b', 'd', 'human'): 11,
+                ('b', 'e', 'human'): 11,
+                ('b', 'f', 'human'): -10,
+                ('c', 'd', 'human'): 8,
+                ('c', 'e', 'human'): -9,
+                ('c', 'f', 'human'): 10,
+                ('d', 'e', 'human'): -6,
+                ('d', 'f', 'human'): -8,
+                ('e', 'f', 'human'): 13,
+            }
+            self.initial_clustering = []
+            self.first_nodes_to_remove = []
+            self.first_edges_to_add = []
+            self.corr_dict = []
+
+
         #  Initialize the list of what's been
 
     def aug_request_cb(self, edge_triples):
@@ -799,11 +845,15 @@ def ensure_iterations_and_phase_changes(which_graph):
         logger.info('Done with step-by-step iterations')
 
 
-def run_until_convergence(which_graph, print_graph=False):
+def run_until_convergence(which_graph, print_graph=False, should_densify=False):
     params = default_params()
+    params['should_densify'] = should_densify  # use the default settings when densifying
     if print_graph:
         params['draw_iterations'] = True
         params['drawing_prefix'] = 'test_graph_%d' % which_graph
+    if should_densify:
+        params['should_densify'] = True
+        # could change paramters here....
 
     logger.info('===========================================')
     logger.info('Test graph: %s' % (which_graph,))
@@ -853,10 +903,13 @@ def test_graph_algorithm():
     test_add_and_remove()  # which_grap in range 0..10
     ensure_iterations_and_phase_changes(which_graph=10)
     ensure_iterations_and_phase_changes(which_graph=11)
+    """
     run_until_convergence(which_graph=12)
     run_until_convergence(which_graph=13)
     run_until_convergence(which_graph=14, print_graph=True)
     run_until_convergence(which_graph=15)
+    """
+    run_until_convergence(which_graph=16, print_graph=True, should_densify=True)
 
 
 if __name__ == '__main__':

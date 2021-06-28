@@ -675,15 +675,18 @@ class graph_algorithm(object):  # NOQA
         should both be empty.
         """
         prs_to_add = []
-        lcas = self.queues.Q.get_all()
+        lcas = self.queues.Q.get_all().copy()
+        self.queues.Q.clear()
+        self.cid2lca.clear()
+
         for a in lcas:
             to_add = a.densify_singleton(self.params)
             if len(to_add) > 0:
                 self.queues.add_to_W(a)
+                self.cid2lca.add(a)
                 prs_to_add.extend(to_add)
         if len(prs_to_add) > 0:
             self.weight_mgr.request_new_weights(prs_to_add)
-        self.queues.Q.clear()
 
     def status_check(self):
         active_scores = []
