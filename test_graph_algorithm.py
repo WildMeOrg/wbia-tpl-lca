@@ -903,12 +903,10 @@ def test_graph_algorithm():
     test_add_and_remove()  # which_grap in range 0..10
     ensure_iterations_and_phase_changes(which_graph=10)
     ensure_iterations_and_phase_changes(which_graph=11)
-    """
     run_until_convergence(which_graph=12)
     run_until_convergence(which_graph=13)
     run_until_convergence(which_graph=14, print_graph=True)
     run_until_convergence(which_graph=15)
-    """
     run_until_convergence(which_graph=16, print_graph=True, should_densify=True)
 
 

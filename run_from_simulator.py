@@ -81,6 +81,9 @@ def get_base_params():
     base_ga_params['tries_before_edge_done'] = 4
     base_ga_params['ga_iterations_before_return'] = 100000  # convergence
     base_ga_params['ga_max_num_waiting'] = 50
+    base_ga_params['should_densify'] = False
+    base_ga_params['densify_min_edges'] = 5 * 4 / 2   # C(5, 2)
+    base_ga_params['densify_frac'] = 0.5
     base_ga_params['log_level'] = logging.INFO
     base_ga_params['draw_iterations'] = False
     base_ga_params['drawing_prefix'] = 'drawing_lca'
