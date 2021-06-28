@@ -160,7 +160,7 @@ class LCA(object):
             for j in range(i + 1, len(nodes)):
                 n = nodes[j]
                 if n not in self.subgraph[m]:
-                    missing.append([m, n])
+                    missing.append((m, n))
 
         if len(missing) == 0:
             return []
