@@ -930,7 +930,7 @@ class LCAActor(GraphActor):
             # 'ga_max_num_waiting': 1000,
 
             # EXTENSIVE
-            'min_delta_converge_multiplier': 0.95,
+            'min_delta_converge_multiplier': 1.5,
             'min_delta_stability_ratio': 4,
             'num_per_augmentation': 2,
             'tries_before_edge_done': 4,
@@ -947,12 +947,15 @@ class LCAActor(GraphActor):
 
         prob_human_correct = actor.lca_config.get('prob_human_correct', HUMAN_CORRECT_RATE)
         actor.config = {
-            'warmup.n_peek': 50,
+            'warmup.n_peek': 500,
             'weighter_required_reviews': 50,
             'weighter_recent_reviews': 1000,
             'init_nids': [],
             'autoreview.enabled': USE_AUTOREVIEW,
             'autoreview.prob_human_correct': prob_human_correct,
+
+            'load_verifier_gt_filepath': '/data/db/lca.verifier.zebra_grevys.canonical.pkl',
+            'save_verifier_gt_filepath': '/data/db/lca.verifier.zebra_grevys.canonical.pkl',
         }
         # fmt: on
 
@@ -1051,85 +1054,94 @@ class LCAActor(GraphActor):
 
         assert actor.infr is not None
 
-        quads_ext = actor._get_edge_quads_ext_using_reviews(delay_compute=True)
-        logger.info('Fetched %d reviews' % (len(quads_ext),))
+        load_verifier_gt_filepath = actor.config.get('load_verifier_gt_filepath', None)
+        save_verifier_gt_filepath = actor.config.get('save_verifier_gt_filepath', None)
 
-        verifier_gt = {
-            ALGO_AUG_NAME: {
-                'gt_positive_probs': [],
-                'gt_negative_probs': [],
+        if load_verifier_gt_filepath is None:
+            quads_ext = actor._get_edge_quads_ext_using_reviews(delay_compute=True)
+            logger.info('Fetched %d reviews' % (len(quads_ext),))
+
+            verifier_gt = {
+                ALGO_AUG_NAME: {
+                    'gt_positive_probs': [],
+                    'gt_negative_probs': [],
+                }
             }
-        }
-        for n0, n1, decision, weight, aug_name in quads_ext:
-            edge = (
-                convert_lca_node_id_to_wbia_annot_id(n0),
-                convert_lca_node_id_to_wbia_annot_id(n1),
-            )
-            if not is_aug_name_human(aug_name):
-                continue
-            if decision == POSTV:
-                key = 'gt_positive_probs'
-            elif decision == NEGTV:
-                key = 'gt_negative_probs'
-            else:
-                key = None
-            if key is not None:
-                verifier_gt[ALGO_AUG_NAME][key].append(edge)
-
-        for algo in verifier_gt:
-            for key in verifier_gt[algo]:
-                edges = verifier_gt[algo][key]
-                num_edges_ = len(edges)
-                edges = list(set(edges))
-                num_edges = len(edges)
-                min_edges = actor.config.get('weighter_required_reviews')
-                max_edges = actor.config.get('weighter_recent_reviews')
-                logger.info(
-                    'Found %d de-duplicated review edges (from %d total) for %s %s'
-                    % (
-                        num_edges,
-                        num_edges_,
-                        algo,
-                        key,
-                    )
+            for n0, n1, decision, weight, aug_name in quads_ext:
+                edge = (
+                    convert_lca_node_id_to_wbia_annot_id(n0),
+                    convert_lca_node_id_to_wbia_annot_id(n1),
                 )
-                if num_edges < min_edges:
-                    args = (
-                        key,
-                        num_edges,
-                        min_edges,
+                if not is_aug_name_human(aug_name):
+                    continue
+                if decision == POSTV:
+                    key = 'gt_positive_probs'
+                elif decision == NEGTV:
+                    key = 'gt_negative_probs'
+                else:
+                    key = None
+                if key is not None:
+                    verifier_gt[ALGO_AUG_NAME][key].append(edge)
+
+            for algo in verifier_gt:
+                for key in verifier_gt[algo]:
+                    edges = verifier_gt[algo][key]
+                    num_edges_ = len(edges)
+                    edges = list(set(edges))
+                    num_edges = len(edges)
+                    min_edges = actor.config.get('weighter_required_reviews')
+                    max_edges = actor.config.get('weighter_recent_reviews')
+                    logger.info(
+                        'Found %d de-duplicated review edges (from %d total) for %s %s'
+                        % (
+                            num_edges,
+                            num_edges_,
+                            algo,
+                            key,
+                        )
                     )
-                    logger.info('WARMUP failed: key %r has %d edges, needs %d' % args)
-                    return False
+                    if num_edges < min_edges:
+                        args = (
+                            key,
+                            num_edges,
+                            min_edges,
+                        )
+                        logger.info('WARMUP failed: key %r has %d edges, needs %d' % args)
+                        return False
 
-                thresh_edges = -1 * min(num_edges, max_edges)
-                random.seed(1)
-                random.shuffle(edges)
-                edges = edges[thresh_edges:]
-                probs, _, _ = actor._candidate_edge_probs(edges)
+                    thresh_edges = -1 * min(num_edges, max_edges)
+                    random.seed(1)
+                    random.shuffle(edges)
+                    edges = edges[thresh_edges:]
+                    probs, _, _ = actor._candidate_edge_probs(edges)
 
-                # Filter out outliers
-                probs = np.array(probs)
-                mean_probs = np.mean(probs)
-                std_probs = np.std(probs)
-                min_probs = mean_probs - (std_probs * 2.0)
-                max_probs = mean_probs + (std_probs * 2.0)
-                logger.info(
-                    'Discarding outlies in %d review edges with [%0.02f <- %0.02f +/- %0.02f -> %0.02f]'
-                    % (
-                        len(probs),
-                        min_probs,
-                        mean_probs,
-                        std_probs,
-                        max_probs,
+                    # Filter out outliers
+                    probs = np.array(probs)
+                    mean_probs = np.mean(probs)
+                    std_probs = np.std(probs)
+                    min_probs = mean_probs - (std_probs * 2.0)
+                    max_probs = mean_probs + (std_probs * 2.0)
+                    logger.info(
+                        'Discarding outlies in %d review edges with [%0.02f <- %0.02f +/- %0.02f -> %0.02f]'
+                        % (
+                            len(probs),
+                            min_probs,
+                            mean_probs,
+                            std_probs,
+                            max_probs,
+                        )
                     )
-                )
-                probs = [
-                    prob for prob in probs if min_probs <= prob and prob <= max_probs
-                ]
-                logger.info('Keeping %d review edges' % (len(probs),))
+                    probs = [
+                        prob for prob in probs if min_probs <= prob and prob <= max_probs
+                    ]
+                    logger.info('Keeping %d review edges' % (len(probs),))
 
-                verifier_gt[algo][key] = probs
+                    verifier_gt[algo][key] = probs
+        else:
+            verifier_gt = ut.load_cPkl(load_verifier_gt_filepath)
+
+        if save_verifier_gt_filepath is not None:
+            ut.save_cPkl(save_verifier_gt_filepath, verifier_gt)
 
         logger.info(ut.repr3(verifier_gt))
 
