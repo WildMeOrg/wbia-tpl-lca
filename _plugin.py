@@ -934,7 +934,7 @@ class LCAActor(GraphActor):
             'min_delta_stability_ratio': 4,
             'num_per_augmentation': 2,
             'tries_before_edge_done': 4,
-            'ga_max_num_waiting': 1,
+            'ga_max_num_waiting': 1000,
 
             'ga_iterations_before_return': 100,  # IS THIS USED?
 
