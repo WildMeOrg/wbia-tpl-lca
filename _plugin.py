@@ -1288,9 +1288,13 @@ class LCAActor(GraphActor):
         old_ranker_params = actor.infr.ranker_params
         actor.infr.ranker_params = {}
 
+        cfgdict_ = {
+            'pipeline_root': 'PieTwo',
+        }
+
         # Run LNBNN to find matches
         if USE_COLDSTART:
-            candidate_edges = actor.infr.find_lnbnn_candidate_edges()
+            candidate_edges = actor.infr.find_lnbnn_candidate_edges(cfgdict_=cfgdict_)
         else:
             candidate_edges = []
             for desired_states_ in desired_states:
@@ -1305,6 +1309,7 @@ class LCAActor(GraphActor):
                                 prescore_method=score_method,
                                 score_method=score_method,
                                 requery=False,
+                                cfgdict_=cfgdict_,
                             )
                             candidate_edges += actor.infr.find_lnbnn_candidate_edges(
                                 desired_states=desired_states_,
@@ -1314,6 +1319,7 @@ class LCAActor(GraphActor):
                                 prescore_method=score_method,
                                 score_method=score_method,
                                 requery=False,
+                                cfgdict_=cfgdict_,
                             )
 
         # Reset ranker_params to default
