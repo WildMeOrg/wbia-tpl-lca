@@ -1246,6 +1246,8 @@ class LCAActor(GraphActor):
             prob_ = 0.5 + (match_prob - nomatch_prob) / 2
             candidate_probs.append(prob_)
 
+        return candidate_probs
+
     def _candidate_edge_probs_pie_v2(actor, candidate_edges):
         arg1 = ut.take_column(candidate_edges, 0)
         arg2 = ut.take_column(candidate_edges, 1)
