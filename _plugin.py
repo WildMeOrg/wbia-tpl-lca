@@ -1306,7 +1306,7 @@ class LCAActor(GraphActor):
         # cfgdict_ = {
         #     'pipeline_root': 'PieTwo',
         # }
-        # batch_size = 1
+        # batch_size = 128
 
         # RANKER: HOTSPOTTER
         cfgdict_ = {}
