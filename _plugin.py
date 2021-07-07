@@ -354,6 +354,7 @@ def get_ggr_stats(ibs, valid_aids, valid_nids):
 
     valid_gids = ibs.get_annot_gids(valid_aids)
     date_str_list = get_dates(ibs, valid_gids)
+
     name_dates_stats = {}
     for valid_aid, valid_nid, date_str in zip(valid_aids, valid_nids, date_str_list):
         if valid_nid not in name_dates_stats:
@@ -1294,7 +1295,9 @@ class LCAActor(GraphActor):
 
         # Run LNBNN to find matches
         if USE_COLDSTART:
-            candidate_edges = actor.infr.find_lnbnn_candidate_edges(cfgdict_=cfgdict_)
+            candidate_edges = actor.infr.find_lnbnn_candidate_edges(
+                cfgdict_=cfgdict_, batch_size=1
+            )
         else:
             candidate_edges = []
             for desired_states_ in desired_states:
@@ -1310,6 +1313,7 @@ class LCAActor(GraphActor):
                                 score_method=score_method,
                                 requery=False,
                                 cfgdict_=cfgdict_,
+                                batch_size=1,
                             )
                             candidate_edges += actor.infr.find_lnbnn_candidate_edges(
                                 desired_states=desired_states_,
@@ -1320,6 +1324,7 @@ class LCAActor(GraphActor):
                                 score_method=score_method,
                                 requery=False,
                                 cfgdict_=cfgdict_,
+                                batch_size=1,
                             )
 
         # Reset ranker_params to default
