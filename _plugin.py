@@ -1207,10 +1207,7 @@ class LCAActor(GraphActor):
         status = 'warmup' if actor.warmup else 'initialized'
         return status
 
-    def _candidate_edge_probs(actor, candidate_edges, update_infr=False):
-        if len(candidate_edges) == 0:
-            return [], [], []
-
+    def _candidate_edge_probs_vamp(actor, candidate_edges, update_infr=False):
         task_probs = actor.infr._make_task_probs(candidate_edges)
         match_probs = list(task_probs['match_state']['match'])
         nomatch_probs = list(task_probs['match_state']['nomatch'])
@@ -1248,6 +1245,22 @@ class LCAActor(GraphActor):
         for match_prob, nomatch_prob in zip(match_probs, nomatch_probs):
             prob_ = 0.5 + (match_prob - nomatch_prob) / 2
             candidate_probs.append(prob_)
+
+    def _candidate_edge_probs_pie_v2(actor, candidate_edges):
+        arg1 = ut.take_column(candidate_edges, 0)
+        arg2 = ut.take_column(candidate_edges, 1)
+        results = actor.infr.ibs.depc_annot.get('PieTwo', (arg1, arg2))
+        candidate_probs = ut.take_column(results, 0)
+        return candidate_probs
+
+    def _candidate_edge_probs(actor, candidate_edges, update_infr=False):
+        if len(candidate_edges) == 0:
+            return [], [], []
+
+        candidate_probs = actor._candidate_edge_probs_vamp(
+            candidate_edges, update_infr=update_infr
+        )
+        # candidate_probs = actor._candidate_edge_probs_pie_v2(candidate_edges)
 
         num_probs = len(candidate_probs)
         min_probs = None if num_probs == 0 else '%0.04f' % (min(candidate_probs),)
@@ -1289,14 +1302,20 @@ class LCAActor(GraphActor):
         old_ranker_params = actor.infr.ranker_params
         actor.infr.ranker_params = {}
 
-        cfgdict_ = {
-            'pipeline_root': 'PieTwo',
-        }
+        # RANKER: PIE
+        # cfgdict_ = {
+        #     'pipeline_root': 'PieTwo',
+        # }
+        # batch_size = 1
+
+        # RANKER: HOTSPOTTER
+        cfgdict_ = {}
+        batch_size = None
 
         # Run LNBNN to find matches
         if USE_COLDSTART:
             candidate_edges = actor.infr.find_lnbnn_candidate_edges(
-                cfgdict_=cfgdict_, batch_size=1
+                cfgdict_=cfgdict_, batch_size=batch_size
             )
         else:
             candidate_edges = []
@@ -1313,7 +1332,7 @@ class LCAActor(GraphActor):
                                 score_method=score_method,
                                 requery=False,
                                 cfgdict_=cfgdict_,
-                                batch_size=1,
+                                batch_size=batch_size,
                             )
                             candidate_edges += actor.infr.find_lnbnn_candidate_edges(
                                 desired_states=desired_states_,
@@ -1324,7 +1343,7 @@ class LCAActor(GraphActor):
                                 score_method=score_method,
                                 requery=False,
                                 cfgdict_=cfgdict_,
-                                batch_size=1,
+                                batch_size=batch_size,
                             )
 
         # Reset ranker_params to default
