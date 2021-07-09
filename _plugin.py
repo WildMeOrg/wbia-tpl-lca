@@ -23,6 +23,8 @@ import sys
 from wbia_lca import ga_driver
 from wbia_lca import overall_driver
 
+import tqdm
+
 logger = logging.getLogger('wbia_lca')
 
 
@@ -935,7 +937,7 @@ class LCAActor(GraphActor):
             'min_delta_stability_ratio': 4,
             'num_per_augmentation': 2,
             'tries_before_edge_done': 4,
-            'ga_max_num_waiting': 1000,
+            'ga_max_num_waiting': 1,
 
             'ga_iterations_before_return': 100,  # IS THIS USED?
 
@@ -1249,10 +1251,20 @@ class LCAActor(GraphActor):
         return candidate_probs
 
     def _candidate_edge_probs_pie_v2(actor, candidate_edges):
-        arg1 = ut.take_column(candidate_edges, 0)
-        arg2 = ut.take_column(candidate_edges, 1)
-        results = actor.infr.ibs.depc_annot.get('PieTwo', (arg1, arg2))
-        candidate_probs = ut.take_column(results, 0)
+        ut.embed()
+
+        from wbia_pie_v2._plugin import distance_to_score
+
+        candidate_probs = []
+        for edge in tqdm.tqdm(candidate_edges):
+            qaid, daid = edge
+            pie_annot_distances = actor.infr.ibs.pie_v2_predict_light_distance(
+                qaid,
+                [daid],
+            )
+            pie_annot_distance = pie_annot_distances[0]
+            score = distance_to_score(pie_annot_distance, norm=500.0)
+            candidate_probs.append(score)
         return candidate_probs
 
     def _candidate_edge_probs(actor, candidate_edges, update_infr=False):
@@ -1305,14 +1317,16 @@ class LCAActor(GraphActor):
         actor.infr.ranker_params = {}
 
         # RANKER: PIE
-        # cfgdict_ = {
-        #     'pipeline_root': 'PieTwo',
-        # }
+        cfgdict_ = {
+            'pipeline_root': 'PieTwo',
+            'use_knn': False,
+        }
         # batch_size = 128
+        batch_size = None
 
         # RANKER: HOTSPOTTER
-        cfgdict_ = {}
-        batch_size = None
+        # cfgdict_ = {}
+        # batch_size = None
 
         # Run LNBNN to find matches
         if USE_COLDSTART:
