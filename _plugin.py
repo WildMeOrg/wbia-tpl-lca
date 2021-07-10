@@ -631,9 +631,9 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
 
         quads = list(zip(aid_1_list, aid_2_list, value_list, aug_name_list))
 
-        num_vamp = aug_name_list.count(ALGO_AUG_NAME)
+        num_auto = aug_name_list.count(ALGO_AUG_NAME)
         num_human = aug_name_list.count(HUMAN_AUG_NAME)
-        assert num_vamp <= self.max_auto_reviews
+        assert num_auto <= self.max_auto_reviews
         assert num_human <= self.max_human_reviews
         assert len(quads) <= self.max_reviews
 
@@ -744,34 +744,34 @@ class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
     def edge_request_cb_async(self):
         actor = self.controller
 
-        requested_vamp_edges = []
+        requested_auto_edges = []
         keep_edge_requests = []
         for edge in self.get_edge_requests():
             n0, n1, aug_name = edge
             if is_aug_name_algo(aug_name):
                 aid1 = convert_lca_node_id_to_wbia_annot_id(n0)
                 aid2 = convert_lca_node_id_to_wbia_annot_id(n1)
-                requested_vamp_edges.append((aid1, aid2))
+                requested_auto_edges.append((aid1, aid2))
             else:
                 keep_edge_requests.append(edge)
 
-        request_data = actor._candidate_edge_probs(requested_vamp_edges, update_infr=True)
+        request_data = actor._candidate_edge_probs(requested_auto_edges, update_infr=True)
         (
-            requested_vamp_probs,
-            requested_vamp_prob_quads,
-            requested_vamp_quads,
+            requested_auto_probs,
+            requested_auto_prob_quads,
+            requested_auto_quads,
         ) = request_data
-        self.edge_results += requested_vamp_quads
+        self.edge_results += requested_auto_quads
         self.set_edge_requests(keep_edge_requests)
 
         args = (
-            len(requested_vamp_edges),
-            len(requested_vamp_quads),
+            len(requested_auto_edges),
+            len(requested_auto_quads),
             len(self.edge_results),
             len(keep_edge_requests),
         )
         logger.info(
-            'Received %d VAMP edge requests, added %d new results for %d total, kept %d requests in queue'
+            'Received %d Verifier edge requests, added %d new results for %d total, kept %d requests in queue'
             % args
         )
 
@@ -862,7 +862,9 @@ class LCAActor(GraphActor):
         >>> content = actor.handle(user_resp_payload)
     """
 
-    def __init__(actor, *args, **kwargs):
+    def __init__(
+        actor, *args, ranker='hotspotter', verifier='vamp', num_waiting=1000, **kwargs
+    ):
         actor.infr = None
         actor.graph_uuid = None
 
@@ -918,6 +920,35 @@ class LCAActor(GraphActor):
             # 'algo.hardcase': False,
         }
 
+        if ranker == 'hotspotter':
+            actor.ranker_config = {}
+        elif ranker == 'pie_v2':
+            actor.ranker_config = {
+                'pipeline_root': 'PieTwo',
+                'use_knn': False,
+            }
+        else:
+            raise ValueError('Unsupported Ranker')
+
+        if verifier == 'vamp':
+            actor.verifier_config = {
+                'verifier': 'vamp',
+                'load_verifier_gt_filepath': None,
+                'save_verifier_gt_filepath': None,
+            }
+        elif verifier == 'vamp+':
+            actor.verifier_config = {
+                'verifier': 'vamp',
+                'load_verifier_gt_filepath': '/data/db/lca.verifier.zebra_grevys.canonical.pkl',
+                'save_verifier_gt_filepath': '/data/db/lca.verifier.zebra_grevys.canonical.pkl',
+            }
+        elif verifier == 'pie_v2':
+            actor.verifier_config = {
+                'verifier': 'pie_v2',
+            }
+        else:
+            raise ValueError('Unsupported Verifier')
+
         actor.lca_config = {
             'aug_names': [
                 ALGO_AUG_NAME,
@@ -937,7 +968,7 @@ class LCAActor(GraphActor):
             'min_delta_stability_ratio': 4,
             'num_per_augmentation': 2,
             'tries_before_edge_done': 4,
-            'ga_max_num_waiting': 1,
+            'ga_max_num_waiting': num_waiting,
 
             'ga_iterations_before_return': 100,  # IS THIS USED?
 
@@ -956,9 +987,6 @@ class LCAActor(GraphActor):
             'init_nids': [],
             'autoreview.enabled': USE_AUTOREVIEW,
             'autoreview.prob_human_correct': prob_human_correct,
-
-            'load_verifier_gt_filepath': '/data/db/lca.verifier.zebra_grevys.canonical.pkl',
-            'save_verifier_gt_filepath': '/data/db/lca.verifier.zebra_grevys.canonical.pkl',
         }
         # fmt: on
 
@@ -998,7 +1026,7 @@ class LCAActor(GraphActor):
 
         actor.infr.print('infr.status() = {}'.format(ut.repr4(actor.infr.status())))
 
-        # Load VAMP models
+        # Load Verifier models for Verifier
         actor.infr.print('loading published models')
         actor.infr.load_published()
 
@@ -1057,8 +1085,12 @@ class LCAActor(GraphActor):
 
         assert actor.infr is not None
 
-        load_verifier_gt_filepath = actor.config.get('load_verifier_gt_filepath', None)
-        save_verifier_gt_filepath = actor.config.get('save_verifier_gt_filepath', None)
+        load_verifier_gt_filepath = actor.verifier_config.get(
+            'load_verifier_gt_filepath', None
+        )
+        save_verifier_gt_filepath = actor.verifier_config.get(
+            'save_verifier_gt_filepath', None
+        )
 
         if load_verifier_gt_filepath is None:
             quads_ext = actor._get_edge_quads_ext_using_reviews(delay_compute=True)
@@ -1209,7 +1241,7 @@ class LCAActor(GraphActor):
         status = 'warmup' if actor.warmup else 'initialized'
         return status
 
-    def _candidate_edge_probs_vamp(actor, candidate_edges, update_infr=False):
+    def _candidate_edge_probs_auto(actor, candidate_edges, update_infr=False):
         task_probs = actor.infr._make_task_probs(candidate_edges)
         match_probs = list(task_probs['match_state']['match'])
         nomatch_probs = list(task_probs['match_state']['nomatch'])
@@ -1251,9 +1283,10 @@ class LCAActor(GraphActor):
         return candidate_probs
 
     def _candidate_edge_probs_pie_v2(actor, candidate_edges):
-        ut.embed()
-
         from wbia_pie_v2._plugin import distance_to_score
+
+        # Ensure features
+        actor.infr.ibs.pie_v2_embedding(actor.infr.aids)
 
         candidate_probs = []
         for edge in tqdm.tqdm(candidate_edges):
@@ -1265,16 +1298,22 @@ class LCAActor(GraphActor):
             pie_annot_distance = pie_annot_distances[0]
             score = distance_to_score(pie_annot_distance, norm=500.0)
             candidate_probs.append(score)
+
         return candidate_probs
 
     def _candidate_edge_probs(actor, candidate_edges, update_infr=False):
         if len(candidate_edges) == 0:
             return [], [], []
 
-        candidate_probs = actor._candidate_edge_probs_vamp(
-            candidate_edges, update_infr=update_infr
-        )
-        # candidate_probs = actor._candidate_edge_probs_pie_v2(candidate_edges)
+        verifier_algo = actor.verifier_config.get('verifier', 'vamp')
+        if verifier_algo == 'vamp':
+            candidate_probs = actor._candidate_edge_probs_auto(
+                candidate_edges, update_infr=update_infr
+            )
+        elif verifier_algo == 'pie_v2':
+            candidate_probs = actor._candidate_edge_probs_pie_v2(candidate_edges)
+        else:
+            raise ValueError('Verifier algorithm %r is not supported' % (verifier_algo,))
 
         num_probs = len(candidate_probs)
         min_probs = None if num_probs == 0 else '%0.04f' % (min(candidate_probs),)
@@ -1284,7 +1323,7 @@ class LCAActor(GraphActor):
 
         args = (num_probs, min_probs, max_probs, mean_probs, std_probs)
         logger.info(
-            'VAMP probabilities on %d edges (range: %s - %s, mean: %s +/- %s)' % args
+            'Verifier probabilities on %d edges (range: %s - %s, mean: %s +/- %s)' % args
         )
         # logger.info(ut.repr2(list(zip(candidate_edges, candidate_probs))))
 
@@ -1316,22 +1355,10 @@ class LCAActor(GraphActor):
         old_ranker_params = actor.infr.ranker_params
         actor.infr.ranker_params = {}
 
-        # RANKER: PIE
-        cfgdict_ = {
-            'pipeline_root': 'PieTwo',
-            'use_knn': False,
-        }
-        # batch_size = 128
-        batch_size = None
-
-        # RANKER: HOTSPOTTER
-        # cfgdict_ = {}
-        # batch_size = None
-
-        # Run LNBNN to find matches
+        # Run Ranker to find matches
         if USE_COLDSTART:
             candidate_edges = actor.infr.find_lnbnn_candidate_edges(
-                cfgdict_=cfgdict_, batch_size=batch_size
+                cfgdict_=actor.ranker_config
             )
         else:
             candidate_edges = []
@@ -1347,8 +1374,7 @@ class LCAActor(GraphActor):
                                 prescore_method=score_method,
                                 score_method=score_method,
                                 requery=False,
-                                cfgdict_=cfgdict_,
-                                batch_size=batch_size,
+                                cfgdict_=actor.ranker_config,
                             )
                             candidate_edges += actor.infr.find_lnbnn_candidate_edges(
                                 desired_states=desired_states_,
@@ -1358,17 +1384,16 @@ class LCAActor(GraphActor):
                                 prescore_method=score_method,
                                 score_method=score_method,
                                 requery=False,
-                                cfgdict_=cfgdict_,
-                                batch_size=batch_size,
+                                cfgdict_=actor.ranker_config,
                             )
 
         # Reset ranker_params to default
         actor.infr.ranker_params = old_ranker_params
 
         candidate_edges = list(set(candidate_edges))
-        logger.info('Edges from LNBNN ranking %d' % (len(candidate_edges),))
+        logger.info('Edges from ranking %d' % (len(candidate_edges),))
 
-        # Run VAMP on candidates
+        # Run Verifier on candidates
         candidate_probs, _, candidate_quads = actor._candidate_edge_probs(candidate_edges)
 
         # Requested warm-up, return this data immediately
@@ -1390,22 +1415,22 @@ class LCAActor(GraphActor):
 
         actor.db.add_edges_db(review_quads)
 
-        # Initialize the edge weights from LNBNN
+        # Initialize the edge weights from Ranker
         actor.db.add_edges_db(candidate_quads)
 
-        # Collect verifier results from LNBNN matches and VAMP scores
+        # Collect verifier results from Ranker matches and Verifier scores
         weight_rowid_list = actor.infr.ibs.get_edge_weight_rowids_between(actor.infr.aids)
         weight_edge_list = actor.infr.ibs.get_edge_weight_aid_tuple(weight_rowid_list)
         weight_edge_list = list(set(weight_edge_list))
 
-        # Update all VAMP edges in database
+        # Update all Verifier edges in database
         _, verifier_prob_quads, verifier_quads = actor._candidate_edge_probs(
             weight_edge_list
         )
         actor.db.add_edges_db(verifier_quads)
 
         verifier_results = verifier_prob_quads
-        logger.info('Using %d VAMP edge weights' % (len(verifier_results),))
+        logger.info('Using %d Verifier edge weights' % (len(verifier_results),))
 
         # Collect human decisions
         human_decisions = []
