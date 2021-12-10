@@ -32,13 +32,13 @@ class weighter(object):  # NOQA
         )
 
     def wgt(self, score):
-        """  Given a verification score produce a (scalar) weight """
+        """Given a verification score produce a (scalar) weight"""
         w0 = self.raw_wgt_(score)
         w = self.scale_and_trunc_(w0)
         return int(w)
 
     def human_wgt(self, is_marked_correct):
-        """  Given a human decision, produce a weight """
+        """Given a human decision, produce a weight"""
         if is_marked_correct is None:
             return self.incomparable_weight
 

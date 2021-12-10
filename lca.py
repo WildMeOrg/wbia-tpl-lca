@@ -167,8 +167,9 @@ class LCA(object):
 
         max_ne = len(nodes) * (len(nodes) - 1) // 2
         curr_ne = max_ne - len(missing)
-        targ_ne = max(params['densify_min_edges'],
-                      math.ceil(params['densify_frac'] * max_ne))
+        targ_ne = max(
+            params['densify_min_edges'], math.ceil(params['densify_frac'] * max_ne)
+        )
         num_to_add = max(0, targ_ne - curr_ne)
 
         if num_to_add < len(missing):
@@ -326,12 +327,12 @@ def test_LCA_class():
         % len(a.inconsistent),
     )
     logger.info(
-        "The first pair on the inconsistent list should be (f, i) and is" +
-        str(a.inconsistent[0]),
+        'The first pair on the inconsistent list should be (f, i) and is'
+        + str(a.inconsistent[0]),
     )
     logger.info(
-        'The last pair on the inconsistent list should be (f, g) and is' +
-        str(a.inconsistent[-1]),
+        'The last pair on the inconsistent list should be (f, g) and is'
+        + str(a.inconsistent[-1]),
     )
 
 
@@ -348,8 +349,8 @@ def test_LCA_add_edge_method():
     change_edge = tuple(['i', 'j', 3])
     (from_change, to_change) = a.add_edge(change_edge)
     logger.info(
-        f"Change edge: {change_edge} delta_wgt should be (-3, 3) "
-        f"and is ({from_change}, {to_change})"
+        f'Change edge: {change_edge} delta_wgt should be (-3, 3) '
+        f'and is ({from_change}, {to_change})'
     )
     logger.info('a.delta_score should be -12 and it is %s' % (a.delta_score(),))
     G['i']['j']['weight'] += change_edge[2]
@@ -358,9 +359,8 @@ def test_LCA_add_edge_method():
     change_edge = tuple(['i', 'j', -3])
     (from_change, to_change) = a.add_edge(change_edge)
     logger.info(
-        f'Changing back by adding:' +
-        f'{change_edge}' + 
-        ' delta_wgt should be (3, -3)' ' and is (%d, %d)' % (from_change, to_change),
+        'Changing back by adding:' + f'{change_edge}' + ' delta_wgt should be (3, -3)'
+        ' and is (%d, %d)' % (from_change, to_change),
     )
     logger.info('a.delta_score should be back to -18 and it is %s' % (a.delta_score(),))
     G['i']['j']['weight'] += change_edge[2]
@@ -370,9 +370,8 @@ def test_LCA_add_edge_method():
     change_edge = tuple(['f', 'h', 4])
     (from_change, to_change) = a.add_edge(change_edge)
     logger.info(
-        f'Change edge:' +
-        f'{change_edge}' +
-        'delta_wgt should be (-4, 4)' ' and is (%d, %d)' % (from_change, to_change),
+        'Change edge:' + f'{change_edge}' + 'delta_wgt should be (-4, 4)'
+        ' and is (%d, %d)' % (from_change, to_change),
     )
     logger.info('a.delta_score should be -10 and it is %s' % (a.delta_score(),))
     G.add_edge('f', 'h', weight=change_edge[2])
@@ -382,9 +381,8 @@ def test_LCA_add_edge_method():
     change_edge = tuple(['h', 'i', 9])
     (from_change, to_change) = a.add_edge(change_edge)
     logger.info(
-        f'Change edge:' +
-        f'{change_edge}' +
-        'delta_wgt should be (9, 9)' ' and is (%d, %d)' % (from_change, to_change),
+        'Change edge:' + f'{change_edge}' + 'delta_wgt should be (9, 9)'
+        ' and is (%d, %d)' % (from_change, to_change),
     )
     logger.info('a.delta_score should still be -10 and it is %s' % (a.delta_score(),))
     G['h']['i']['weight'] += change_edge[2]
@@ -407,9 +405,8 @@ def test_LCA_add_edge_method():
     ce = tuple(['h', 'j', 10])
     (from_change, to_change) = a.add_edge(ce)
     logger.info(
-        f'Change edge:' +
-        f'{ce}' +
-        'delta_wgt should be (-10, 10)' ' and is (%d, %d)' % (from_change, to_change),
+        'Change edge:' + f'{ce}' + 'delta_wgt should be (-10, 10)'
+        ' and is (%d, %d)' % (from_change, to_change),
     )
     logger.info(
         'a.delta_score be %d and it is %d' % (delta_score_pre + 20, a.delta_score())
@@ -422,17 +419,16 @@ def test_LCA_add_edge_method():
 
     ce = tuple(['f', 'k', -6])
     logger.info(
-        'Before add_edge pr' +
-        f'{ce[:2]}' +
-        'should be on a.inconsistent. Is it? ' +
-        f'{ce[:2] in a.inconsistent}',
+        'Before add_edge pr'
+        + f'{ce[:2]}'
+        + 'should be on a.inconsistent. Is it? '
+        + f'{ce[:2] in a.inconsistent}',
     )
     delta_score_pre = a.delta_score()
     (from_change, to_change) = a.add_edge(ce)
     logger.info(
-        'Change edge:' +
-        f'{ce}' +
-        'delta_wgt should be (-6, 6)' ' and is (%d, %d)' % (from_change, to_change),
+        'Change edge:' + f'{ce}' + 'delta_wgt should be (-6, 6)'
+        ' and is (%d, %d)' % (from_change, to_change),
     )
     logger.info(
         'a.delta_score be %d and it is %d' % (delta_score_pre + 12, a.delta_score())
@@ -474,17 +470,16 @@ def test_futility_check():
     num_to_return = 3
     prs = a.get_inconsistent(num_to_return, fw.is_futile_tester)
     logger.info('***********')
-    logger.info("Testing get_inconsistent with futility check on edges.")
+    logger.info('Testing get_inconsistent with futility check on edges.')
     logger.info(
         'For simple three-node graph the non-futile, inconsistent pairs'
-        "should be just [('b', 'c')] and is: %a "
-        % prs,
+        "should be just [('b', 'c')] and is: %a " % prs,
     )
 
 
 def test_densify_singleton():
     logger.info('***********')
-    logger.info("Testing densify_singleton")
+    logger.info('Testing densify_singleton')
     G = nx.Graph()
     G.add_weighted_edges_from(
         [
@@ -493,7 +488,7 @@ def test_densify_singleton():
             ('a', 'd', 4),
             ('b', 'c', 5),
             ('b', 'd', -1),
-            ('c', 'd', 8)
+            ('c', 'd', 8),
         ]
     )
     clustering = {0: set(['a', 'b', 'c', 'd'])}
@@ -501,11 +496,11 @@ def test_densify_singleton():
     cids = list(clustering.keys())
     score = ct.clustering_score(G, n2c)
     a = LCA(G, clustering, cids, score)
-    params = {"densify_min_edges": 2,
-              "densify_frac": 1}
+    params = {'densify_min_edges': 2, 'densify_frac': 1}
     to_add = a.densify_singleton(params)
-    logger.info("adding to complete graph should return length 0; "
-                f"result is: {len(to_add)}")
+    logger.info(
+        'adding to complete graph should return length 0; ' f'result is: {len(to_add)}'
+    )
 
     G = nx.Graph()
     G.add_weighted_edges_from(
@@ -516,7 +511,7 @@ def test_densify_singleton():
             ('b', 'e', 5),
             ('c', 'e', -1),
             ('c', 'f', 8),
-            ('d', 'f', 6)
+            ('d', 'f', 6),
         ]
     )
 
@@ -525,38 +520,41 @@ def test_densify_singleton():
     cids = list(clustering.keys())
     score = ct.clustering_score(G, n2c)
     a = LCA(G, clustering, cids, score)
-    params = {"densify_min_edges": 2,
-              "densify_frac": 1}
+    params = {'densify_min_edges': 2, 'densify_frac': 1}
     to_add = a.densify_singleton(params)
-    logger.info("result should be [] because not a singleton;"
-                f" answer is {to_add}")
-    
+    logger.info('result should be [] because not a singleton;' f' answer is {to_add}')
+
     clustering = {0: set(['a', 'b', 'c', 'd', 'e', 'f'])}
     n2c = ct.build_node_to_cluster_mapping(clustering)
     cids = list(clustering.keys())
     score = ct.clustering_score(G, n2c)
     a = LCA(G, clustering, cids, score)
-    params = {"densify_min_edges": 2,
-              "densify_frac": 1}
+    params = {'densify_min_edges': 2, 'densify_frac': 1}
     to_add = a.densify_singleton(params)
-    logger.info("parameter densify_frac = 1 should cause a returned length 8; "
-                f"result is {len(to_add)}")
-    logger.info(f"here are the added edges: {to_add}")
+    logger.info(
+        'parameter densify_frac = 1 should cause a returned length 8; '
+        f'result is {len(to_add)}'
+    )
+    logger.info(f'here are the added edges: {to_add}')
 
-    params["densify_min_edges"] = 10
-    params["densify_frac"] = 0.5
+    params['densify_min_edges'] = 10
+    params['densify_frac'] = 0.5
     to_add = a.densify_singleton(params)
-    logger.info("parameter densify_min_edges "
-                " is %d should add length 3; result: %d"
-                % (params["densify_min_edges"], len(to_add)))
-    logger.info(f"here are the added edges: {to_add}")
+    logger.info(
+        'parameter densify_min_edges '
+        ' is %d should add length 3; result: %d'
+        % (params['densify_min_edges'], len(to_add))
+    )
+    logger.info(f'here are the added edges: {to_add}')
 
-    params["densify_min_edges"] = 5
-    params["densify_frac"] = 0.75
+    params['densify_min_edges'] = 5
+    params['densify_frac'] = 0.75
     to_add = a.densify_singleton(params)
-    logger.info("parameter densify_frac %.2f should add length 5; result: %d"
-                % (params["densify_frac"], len(to_add)))
-    logger.info(f"here are the added edges: {to_add}")
+    logger.info(
+        'parameter densify_frac %.2f should add length 5; result: %d'
+        % (params['densify_frac'], len(to_add))
+    )
+    logger.info(f'here are the added edges: {to_add}')
 
 
 if __name__ == '__main__':

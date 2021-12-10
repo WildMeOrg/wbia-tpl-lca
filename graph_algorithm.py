@@ -215,8 +215,9 @@ class graph_algorithm(object):  # NOQA
         self.num_human_results = 0
         self.removed_nodes = set()
 
-        self.should_run_densify = "should_densify" in self.params \
-            and self.params["should_densify"]
+        self.should_run_densify = (
+            'should_densify' in self.params and self.params['should_densify']
+        )
 
         self.draw_obj = None
         if self.params['draw_iterations']:
@@ -449,11 +450,12 @@ class graph_algorithm(object):  # NOQA
             # densify the singleton LCAs. This is done at most once.
             elif self.should_run_densify:
                 logger.info(
-                    "Decision: top LCA delta is too low and empty waiting queue;"
-                    " will densify singletons")
+                    'Decision: top LCA delta is too low and empty waiting queue;'
+                    ' will densify singletons'
+                )
                 self.densify_singletons()
                 self.should_run_densify = False
-            
+
             # Step 2g: At this point, all active LCAs are waiting, and
             # if there are none then the algorithm has converged!
             else:

@@ -685,11 +685,11 @@ class test_generator(object):  # NOQA
             }
 
         elif which_graph == 16:
-            self.msg = "Testing densification"
+            self.msg = 'Testing densification'
             self.initial_edges = [
                 ('a', 'b', 10, 'vamp'),
                 ('a', 'c', -1, 'vamp'),
-                ('c', 'd',  9, 'vamp'),
+                ('c', 'd', 9, 'vamp'),
                 ('c', 'e', 11, 'vamp'),
                 ('e', 'f', 12, 'vamp'),
             ]
@@ -724,7 +724,6 @@ class test_generator(object):  # NOQA
             self.first_nodes_to_remove = []
             self.first_edges_to_add = []
             self.corr_dict = []
-
 
         #  Initialize the list of what's been
 

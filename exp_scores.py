@@ -21,7 +21,7 @@ class exp_scores(object):  # NOQA
     """
 
     def __init__(self, np_ratio, pos_lambda, neg_lambda):
-        """  Construct the object from the three main parameters """
+        """Construct the object from the three main parameters"""
         self.np_ratio = np_ratio
         self.trunc_exp_pos = truncated_exponential(pos_lambda)
         self.trunc_exp_neg = truncated_exponential(neg_lambda)
