@@ -850,7 +850,7 @@ class LCAActor(GraphActor):
         >>> actor = LCAActor()
         >>> # Start the process
         >>> # dbdir = wbia.sysres.db_to_dbdir('GZ_CensusAnnotation_Eval')
-        >>> dbdir = wbia.sysres.db_to_dbdir('PZ_MTEST')
+        >>> dbdir = wbia.sysres.db_to_dbdir('PZ_MTEST', allow_newdir=True)
         >>> payload = {'action': 'start', 'dbdir': dbdir, 'aids': 'all'}
         >>> start_resp = actor.handle(payload)
         >>> print('start_resp = {!r}'.format(start_resp))
