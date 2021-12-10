@@ -127,13 +127,15 @@ def params_and_weighters(config_ini, verifier_gt):
     assert mw >= 1
     ga_params['ga_max_num_waiting'] = mw
 
-    ga_params['should_densify'] = config_ini['ITERATIONS'].getboolean('should_densify')
+    ga_params['should_densify'] = config_ini['ITERATIONS'].getboolean(
+        'should_densify', False
+    )
 
-    n = int(config_ini['ITERATIONS']['densify_min_edges'])
+    n = int(config_ini['ITERATIONS'].get('densify_min_edges', 1))
     assert n >= 1
     ga_params['densify_min_edges'] = n
 
-    df = float(config_ini['ITERATIONS']['densify_frac'])
+    df = float(config_ini['ITERATIONS'].get('densify_frac', 0.0))
     assert 0 <= df <= 1
     ga_params['densify_frac'] = df
 

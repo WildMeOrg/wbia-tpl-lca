@@ -857,9 +857,10 @@ class LCAActor(GraphActor):
         >>> # Respond with a user decision
         >>> user_request = actor.handle({'action': 'resume'})
         >>> # Wait for a response and the LCAActor in another proc
-        >>> edge, priority, edge_data = user_request[0]
-        >>> user_resp_payload = _testdata_feedback_payload(edge, 'match')
-        >>> content = actor.handle(user_resp_payload)
+        >>> if len(user_request) > 0:
+        >>>     edge, priority, edge_data = user_request[0]
+        >>>     user_resp_payload = _testdata_feedback_payload(edge, 'match')
+        >>>     content = actor.handle(user_resp_payload)
     """
 
     def __init__(
@@ -1462,7 +1463,7 @@ class LCAActor(GraphActor):
         return driver_data
 
     def _make_review_tuple(actor, edge, priority=1.0):
-        """ Makes tuple to be sent back to the user """
+        """Makes tuple to be sent back to the user"""
         edge_data = actor.infr.get_nonvisual_edge_data(edge, on_missing='default')
         # Extra information
         edge_data['nid_edge'] = None
@@ -1574,6 +1575,8 @@ class LCAActor(GraphActor):
             num = actor.config.get('warmup.n_peek')
             user_request = []
             for index in range(num):
+                if len(buckets) == 0:
+                    continue
                 bucket = random.choice(buckets)
                 edges = candidate_buckets[bucket]
                 edge = random.choice(edges)
