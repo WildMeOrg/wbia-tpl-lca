@@ -524,12 +524,18 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
         self.infr = actor.infr
         self.ibs = actor.infr.ibs
 
+        """
+        CHECK ME: make sure this is handled consistently
+        """
         self.max_auto_reviews = 1
         self.max_human_reviews = 10
         self.max_reviews = self.max_auto_reviews + self.max_human_reviews
 
         edges = []
 
+        """
+        FIX ME: Handle COLDSTART as a parameter, not a commandline thingy
+        """
         if USE_COLDSTART:
             logger.info('Cold Start: ignoring existing name clustering')
             clustering = {}
@@ -540,6 +546,13 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
 
     def _get_existing_clustering(self, use_ibeis_database=False):
         clustering = {}
+
+        """
+        FIX ME TO USE THE WBIA DATABASE CLUSTERING AS THE DEFAULT
+        and to handle properly AIDS that don't have names.
+        NOTES:
+        1. MAKE SURE THIS IS ONLY CALLED ONCE!!!
+        """
 
         if use_ibeis_database:
             src_str = 'IBEIS DB'
@@ -592,6 +605,10 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
             max_auto = self.max_auto_reviews
         if max_human is None:
             max_human = self.max_human_reviews
+
+        """
+        CHECK ME: Ensure that this works properly
+        """
         self.ibs.check_edge_weights(
             weight_rowid_list=weight_rowid_list,
             max_auto=max_auto,
@@ -640,6 +657,14 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
         return quads
 
     def commit_cluster_change_db(self, cc):
+        """
+        Two jobs: (1) create a change dictionary with WBIA names, and
+        (2) save clusters as WBIA names. The latter adds NIDs if they didn't
+        exist before and removes NIDs that have changed more than just as
+        the addition of query annotations. This will likely require REVISITING
+        because it makes no effort to preserve metadata that is associated
+        with names that have been removed.
+        """
         logger.info(
             '[commit_cluster_change_db] Requested to commit cluster change: %r' % (cc,)
         )
@@ -664,55 +689,70 @@ class db_interface_wbia(db_interface.db_interface):  # NOQA
                 )
             )
         )
+        change['old'] = []
+        change['new'] = []
+
+        logger.info(f"Change type {change['type']}")
 
         old_clustering = change.pop('old_clustering')
-        change['old'] = {}
+        nids_to_remove = []
         for old_lca_cluster_id in old_clustering:
-            old_wbia_name_id = convert_lca_cluster_id_to_wbia_name_id(old_lca_cluster_id)
             old_lca_node_ids = old_clustering[old_lca_cluster_id]
-            old_wbia_annot_ids = list(
+            wbia_aids = list(
                 map(convert_lca_node_id_to_wbia_annot_id, old_lca_node_ids)
             )
-            change['old'][old_wbia_name_id] = sorted(old_wbia_annot_ids)
+            change['old'].append(wbia_aids)
+            old_nids = self.ibs.get_annot_nids(wbia_aids)
+            old_nids = list(set([nid for nid in old_nids if nid > 0]))
+
+            logger.info(f'Old name id {old_nids}, annotations {wbia_aids}')
+
+            if len(old_nids) > 1:
+                logger.info(
+                    'Error: annots in this old cluster are spread across multiple names'
+                )
+                nids_to_remove.extend(old_nids)  # Set to remove these
+            elif len(old_nids) == 1 and change['type'] in [
+                'removed',
+                'split',
+                'merge',
+                'merge/split',
+            ]:
+                nids_to_remove.extend(old_nids)
+
+        if len(nids_to_remove) > 0:
+            logger.info(f'Deleting old nids {nids_to_remove}')
+            self.ibs.delete_names(nids_to_remove)
 
         new_clustering = change.pop('new_clustering')
-
-        # Make new names
-        existing_nids = self.ibs.get_valid_nids()
-        existing_name_texts = set(self.ibs.get_name_texts(existing_nids))
-        new_lca_cluster_ids = sorted(new_clustering.keys())
-
-        graph_uuid = str(self.controller.graph_uuid)
-        graph_hash = graph_uuid.split('-')[0].strip()
-
-        new_wbia_name_texts = []
-        for new_lca_cluster_id in new_lca_cluster_ids:
-            counter = 0
-            while True:
-                args = (
-                    graph_hash,
-                    new_lca_cluster_id,
-                    counter,
-                )
-                new_wbia_name_text = '%s-%s-%03d' % args
-                counter += 1
-
-                if new_wbia_name_text not in existing_name_texts:
-                    existing_name_texts.add(new_wbia_name_text)
-                    new_wbia_name_texts.append(new_wbia_name_text)
-                    break
-
-        new_wbia_name_ids = self.ibs.add_names(new_wbia_name_texts)
-        new_wbia_name_id_dict = dict(zip(new_lca_cluster_ids, new_wbia_name_ids))
-
-        change['new'] = {}
         for new_lca_cluster_id in new_clustering:
-            new_wbia_name_id = new_wbia_name_id_dict.get(new_lca_cluster_id, None)
             new_lca_node_ids = new_clustering[new_lca_cluster_id]
-            new_wbia_annot_ids = list(
+            wbia_aids = list(
                 map(convert_lca_node_id_to_wbia_annot_id, new_lca_node_ids)
             )
-            change['new'][new_wbia_name_id] = sorted(new_wbia_annot_ids)
+            change['new'].append(wbia_aids)
+            prev_nids = self.ibs.get_annot_nids(wbia_aids)
+            prev_nids = list(set([nid for nid in prev_nids if nid > 0]))
+
+            logger.info(f'Previous nids {prev_nids} for cluster of aids {wbia_aids}')
+            if len(prev_nids) == 0 or change['type'] in [
+                'split',
+                'merge',
+                'merge/split',
+            ]:
+                self.ibs.set_annot_names_to_next_name(wbia_aids)
+                new_nid = self.ibs.get_annot_nids(wbia_aids[0])
+                logger.info(f'Created new name nid {new_nid} for aids {wbia_aids}')
+            elif change['type'] == 'extension':
+                assert len(prev_nids) == 1
+                prev_aids = self.ibs.get_name_aids(prev_nids[0])
+                new_aids = list(set(wbia_aids) - set(prev_aids))
+                self.ibs.set_annot_name_rowids(new_aids, prev_nids * len(new_aids))
+                logger.info(
+                    f'Added aids {new_aids} to prev aids {prev_aids} for nid {prev_nids[0]}'
+                )
+            else:
+                logger.info(f'Cluster {wbia_aids} with nid {prev_nids[0]} is unchanged')
 
         return change
 
@@ -755,7 +795,9 @@ class edge_generator_wbia(edge_generator.edge_generator):  # NOQA
             else:
                 keep_edge_requests.append(edge)
 
-        request_data = actor._candidate_edge_probs(requested_auto_edges, update_infr=True)
+        request_data = actor._candidate_edge_probs(
+            requested_auto_edges, update_infr=True
+        )
         (
             requested_auto_probs,
             requested_auto_prob_quads,
@@ -864,7 +906,7 @@ class LCAActor(GraphActor):
     """
 
     def __init__(
-        actor, *args, ranker='hotspotter', verifier='vamp', num_waiting=1000, **kwargs
+        actor, *args, ranker='hotspotter', verifier='vamp', num_waiting=10, **kwargs
     ):
         actor.infr = None
         actor.graph_uuid = None
@@ -965,7 +1007,7 @@ class LCAActor(GraphActor):
             # 'ga_max_num_waiting': 1000,
 
             # EXTENSIVE
-            'min_delta_converge_multiplier': 1.5,
+            'min_delta_converge_multiplier': 0.98,   # was 1.5,
             'min_delta_stability_ratio': 4,
             'num_per_augmentation': 2,
             'tries_before_edge_done': 4,
@@ -1054,7 +1096,10 @@ class LCAActor(GraphActor):
 
         quads_ext = []
         zipped = zip(
-            review_edge_list, review_decision_list, review_prob_list, review_aug_name_list
+            review_edge_list,
+            review_decision_list,
+            review_prob_list,
+            review_aug_name_list,
         )
         for review_edge, review_decision, review_prob, review_aug_name in zipped:
             if desired_aug_name is not None:
@@ -1142,7 +1187,9 @@ class LCAActor(GraphActor):
                             num_edges,
                             min_edges,
                         )
-                        logger.info('WARMUP failed: key %r has %d edges, needs %d' % args)
+                        logger.info(
+                            'WARMUP failed: key %r has %d edges, needs %d' % args
+                        )
                         return False
 
                     thresh_edges = -1 * min(num_edges, max_edges)
@@ -1168,7 +1215,9 @@ class LCAActor(GraphActor):
                         )
                     )
                     probs = [
-                        prob for prob in probs if min_probs <= prob and prob <= max_probs
+                        prob
+                        for prob in probs
+                        if min_probs <= prob and prob <= max_probs
                     ]
                     logger.info('Keeping %d review edges' % (len(probs),))
 
@@ -1201,7 +1250,9 @@ class LCAActor(GraphActor):
         logger.info(
             'Using provided   min_delta_converge_multiplier = %0.04f' % (multiplier,)
         )
-        logger.info('Using provided   min_delta_stability_ratio     = %0.04f' % (ratio,))
+        logger.info(
+            'Using provided   min_delta_stability_ratio     = %0.04f' % (ratio,)
+        )
         logger.info(
             'Using calculated min_delta_score_converge      = %0.04f' % (convergence,)
         )
@@ -1238,8 +1289,9 @@ class LCAActor(GraphActor):
 
         # Initialize the review iterator
         actor._gen = actor.main_gen()
-
         status = 'warmup' if actor.warmup else 'initialized'
+        logger.info(f'Leaving start with status {status}')
+
         return status
 
     def _candidate_edge_probs_auto(actor, candidate_edges, update_infr=False):
@@ -1314,7 +1366,9 @@ class LCAActor(GraphActor):
         elif verifier_algo == 'pie_v2':
             candidate_probs = actor._candidate_edge_probs_pie_v2(candidate_edges)
         else:
-            raise ValueError('Verifier algorithm %r is not supported' % (verifier_algo,))
+            raise ValueError(
+                'Verifier algorithm %r is not supported' % (verifier_algo,)
+            )
 
         num_probs = len(candidate_probs)
         min_probs = None if num_probs == 0 else '%0.04f' % (min(candidate_probs),)
@@ -1324,7 +1378,8 @@ class LCAActor(GraphActor):
 
         args = (num_probs, min_probs, max_probs, mean_probs, std_probs)
         logger.info(
-            'Verifier probabilities on %d edges (range: %s - %s, mean: %s +/- %s)' % args
+            'Verifier probabilities on %d edges (range: %s - %s, mean: %s +/- %s)'
+            % args
         )
         # logger.info(ut.repr2(list(zip(candidate_edges, candidate_probs))))
 
@@ -1352,16 +1407,20 @@ class LCAActor(GraphActor):
             desired_states = [[POSTV, NEGTV, INCMP, UNKWN, UNREV]]
             # desired_states = [desired_states] + desired_states
 
+        """
         # Reset ranker_params to empty
         old_ranker_params = actor.infr.ranker_params
         actor.infr.ranker_params = {}
+        logger.info('In _refresh_data')
 
         # Run Ranker to find matches
         if USE_COLDSTART:
+            logger.info('Using cold start')
             candidate_edges = actor.infr.find_lnbnn_candidate_edges(
                 cfgdict_=actor.ranker_config
             )
         else:
+            logger.info('No cold start')
             candidate_edges = []
             for desired_states_ in desired_states:
                 for K in [5]:  # [3, 5, 7]:
@@ -1396,10 +1455,13 @@ class LCAActor(GraphActor):
 
         # Run Verifier on candidates
         candidate_probs, _, candidate_quads = actor._candidate_edge_probs(candidate_edges)
+        """
+        candidate_edges, candidate_probs, candidate_quads = [], [], []
 
         # Requested warm-up, return this data immediately
         if warmup:
             warmup_data = candidate_edges, candidate_probs
+            logger.info(f'Returning with {len(candidate_edges)} candidate edges')
             return warmup_data
 
         assert None not in [actor.infr, actor.db, actor.edge_gen]
@@ -1420,7 +1482,9 @@ class LCAActor(GraphActor):
         actor.db.add_edges_db(candidate_quads)
 
         # Collect verifier results from Ranker matches and Verifier scores
-        weight_rowid_list = actor.infr.ibs.get_edge_weight_rowids_between(actor.infr.aids)
+        weight_rowid_list = actor.infr.ibs.get_edge_weight_rowids_between(
+            actor.infr.aids
+        )
         weight_edge_list = actor.infr.ibs.get_edge_weight_aid_tuple(weight_rowid_list)
         weight_edge_list = list(set(weight_edge_list))
 
@@ -1453,7 +1517,9 @@ class LCAActor(GraphActor):
 
         # Purge database of edges
         actor.db._cleanup_edges(max_human=0, max_auto=0)
-        weight_rowid_list = actor.infr.ibs.get_edge_weight_rowids_between(actor.infr.aids)
+        weight_rowid_list = actor.infr.ibs.get_edge_weight_rowids_between(
+            actor.infr.aids
+        )
         assert len(weight_rowid_list) == 0
 
         # Get the clusters to check
@@ -1480,7 +1546,9 @@ class LCAActor(GraphActor):
                 edge, priority, edge_data = review_request
                 aid1, aid2 = edge
 
-                review_rowid_list = actor.infr.ibs.get_review_rowids_from_edges([edge])[0]
+                review_rowid_list = actor.infr.ibs.get_review_rowids_from_edges([edge])[
+                    0
+                ]
                 review_rowid_list = sorted(review_rowid_list)
                 review_decision_list = actor.infr.ibs.get_review_decision(
                     review_rowid_list
@@ -1499,7 +1567,9 @@ class LCAActor(GraphActor):
                 if real_decision is None:
                     name1, name2 = actor.infr.ibs.get_annot_names([aid1, aid2])
                     oracle = random.uniform(0.0, 1.0)
-                    prob_human_correct = actor.config.get('autoreview.prob_human_correct')
+                    prob_human_correct = actor.config.get(
+                        'autoreview.prob_human_correct'
+                    )
                     prob_human_incorrect = 1.0 - prob_human_correct
                     throw_incorrect = oracle <= prob_human_incorrect
 
@@ -1522,7 +1592,9 @@ class LCAActor(GraphActor):
 
                     decision_source = 'inferred'
                 else:
-                    evidence_decision = const.EVIDENCE_DECISION.INT_TO_CODE[real_decision]
+                    evidence_decision = const.EVIDENCE_DECISION.INT_TO_CODE[
+                        real_decision
+                    ]
                     message = ''
                     decision_source = 'matched'
 
@@ -1561,11 +1633,15 @@ class LCAActor(GraphActor):
             # We are still in warm-up, need to ask user for reviews
             warmup_data = actor._refresh_data(warmup=True, desired_states=[[UNREV]])
             candidate_edges, candidate_probs = warmup_data
-            candidate_probs_ = list(map(int, np.around(np.array(candidate_probs) * 10.0)))
+            candidate_probs_ = list(
+                map(int, np.around(np.array(candidate_probs) * 10.0))
+            )
 
             # Create stratified buckets based on probabilities
             candidate_buckets = {}
-            for candidate_edge, candidate_prob_ in zip(candidate_edges, candidate_probs_):
+            for candidate_edge, candidate_prob_ in zip(
+                candidate_edges, candidate_probs_
+            ):
                 if candidate_prob_ not in candidate_buckets:
                     candidate_buckets[candidate_prob_] = []
                 candidate_buckets[candidate_prob_].append(candidate_edge)
@@ -1590,6 +1666,7 @@ class LCAActor(GraphActor):
 
             user_request = actor._attempt_autoreview(user_request)
             if user_request is not None:
+                logger.info(f'Yielding a user request of length {len(user_request)}')
                 yield user_request
 
             # Try to re-initialize LCA
@@ -1685,15 +1762,29 @@ class LCAActor(GraphActor):
                 if user_request is not None:
                     yield user_request
             else:
+                logger.info(f'Change to review type {type(change_to_review)}')
+                if isinstance(change_to_review, list):
+                    logger.info(f'Length {len(change_to_review)}')
+
                 changes_to_review.append(change_to_review)
 
         actor.phase = 3
         actor.loop_phase = 'commit_cluster_change'
 
         actor.changes = []
+        c_count = 0
         for changes in changes_to_review:
             for cc in changes:
                 change = actor.db.commit_cluster_change(cc)
+                logger.info(f'Cluster change {c_count} for WBIA')
+                if change is None:
+                    logger.info('None!')
+                elif isinstance(change, dict):
+                    for k, v in change.items():
+                        logger.info(f'   {k}: {v}')
+                else:
+                    logger.info(f'type is {type(change)}')
+                c_count += 1
                 if change is not None:
                     actor.changes.append(change)
 
